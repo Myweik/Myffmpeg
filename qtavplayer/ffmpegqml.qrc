@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/ffmpeg">
+        <file>ffmpegView.qml</file>
+    </qresource>
+</RCC>
