@@ -121,12 +121,15 @@ signals:
     void send_img(QImage);
 
 private:
+//    AVDictionary dd;
     bool mIsInit = false;
     bool mIsOpenVideoCodec = false;
     AVFormatContext *mFormatCtx = nullptr;
     QString mFilename; // = "udp://@227.70.80.90:2000";
 
     int  mVideoIndex;
+
+    AVStream *mVideo = NULL;
 
     AVCodecContext *mVideoCodecCtx = nullptr; //mCodecCtx
     AVCodec *mVideoCodec = nullptr;           //mCodec
@@ -137,13 +140,21 @@ private:
 
     QVector<RenderItem *> mRenderList; //渲染队列
     QReadWriteLock mRenderListMutex; //队列操作锁
-    int maxRenderListSize = 5; //渲染队列最大数量
+    int maxRenderListSize = 15; //渲染队列最大数量
 
     AVFrame *mFrame = nullptr;
-
     QSize mSize = QSize(0,0);
 
+    //  ----- HW
+    QList<AVCodecHWConfig *> mHWConfigList;
+    bool                     mUseHw = false;
+    /** 硬解上下文 */
+    AVBufferRef *mHWDeviceCtx;
+    /** 硬解格式 */
+    enum AVPixelFormat mHWPixFormat;
 public :
+    static enum AVPixelFormat get_hw_format(AVCodecContext *ctx, const enum AVPixelFormat *pix_fmts);
+
     qint64 requestRenderNextFrame();
 
     void load();
@@ -155,8 +166,11 @@ public :
     void decodec();
     void setFilenameImpl(const QString &source);
 
+    qint64 getNextFrameTime();
     int  getRenderListSize();
 private :
+    int decode_write(AVCodecContext *avctx, AVPacket *packet);
+
     void initRenderList();
 
     void clearRenderList(bool isDelete = false);

@@ -45,15 +45,20 @@ void PlayVideo::setQmlApplicationEngine(QQmlEngine &engine)
 void PlayVideo::requestRender()
 {
     /* 1-60 2->3 45  >3 30 */
-    if(mDecoder->getRenderListSize() >= 1){
-        qint64 currentTime = mDecoder->requestRenderNextFrame();
-
+    if(mDecoder->getRenderListSize() >= 2){
         static  qint64 lastTime = QDateTime::currentMSecsSinceEpoch();
         int space = QDateTime::currentMSecsSinceEpoch() - lastTime;
-        int len = mDecoder->getRenderListSize();
 
+        qint64 currentTime  = mDecoder->requestRenderNextFrame();
+//        qint64 nextTime     = mDecoder->getNextFrameTime();
+
+        int len = mDecoder->getRenderListSize();
         if(len > 3){
-            space = 30 - space;
+//            if(nextTime > currentTime && currentTime != 0)
+//                space = (nextTime - currentTime) / 100 - space ;
+//            else
+                space = 30 - space;
+
         }else if(len > 1){
             space = 45 - space;
         }else{
@@ -61,10 +66,10 @@ void PlayVideo::requestRender()
         }
 
         if(space <= 0){
-            qDebug() << "----------------------space < 0" << len << space << QDateTime::currentMSecsSinceEpoch() - currentTime;
+            qDebug() << "----------------------space < 0" << len << space << mDecoder->requestRenderNextFrame() - currentTime;
             space = 1;
         }else{
-            qDebug() << "================>>>>.space > 0" << len << space << QDateTime::currentMSecsSinceEpoch() - currentTime;
+            qDebug() << "================>>>>.space > 0" << len << space << mDecoder->requestRenderNextFrame() - currentTime;
         }
 
         mMutex.lock();
