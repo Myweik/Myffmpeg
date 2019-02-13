@@ -1,17 +1,19 @@
 SOURCES += \
     $$PWD/src/avdecoder.cpp \
     $$PWD/src/AVThread.cpp \
-    $$PWD/src/imageprovider.cpp \
-    $$PWD/src/playvideo.cpp
+    $$PWD/src/playvideo.cpp \
+    $$PWD/src/AVOutput.cpp
 HEADERS += \
     $$PWD/src/avdecoder.h \
     $$PWD/src/AVThread.h \
-    $$PWD/src/imageprovider.h \
-    $$PWD/src/playvideo.h
-
+    $$PWD/src/playvideo.h \
+    $$PWD/src/AVDefine.h \
+    $$PWD/src/AVOutput.h  \
+    $$PWD/src/AVMediaCallback.h
 
 RESOURCES += \
-    $$PWD/ffmpegqml.qrc
+    $$PWD/ffmpegqml.qrc \
+    $$PWD/qtavplayer.qrc
 
 win32{
     LIBS += -L$$PWD/libs/lib/win32/ -lavcodec -lavfilter -lavformat -lavutil -lswresample -lswscale

@@ -5,6 +5,8 @@
 #include "AVThread.h"
 #include <QVector>
 #include <QImage>
+#include "AVDefine.h"
+#include "AVMediaCallback.h"
 extern "C"
 {
 
@@ -39,21 +41,30 @@ extern "C"
 }
 class AVDecoder;
 
+struct VideoFormat{
+    float width;
+    float height;
+    float rotate;
+    int format;
+
+    AVFrame *renderFrame;
+    QMutex *renderFrameMutex;
+};
+
 class RenderItem{
 public :
     RenderItem()
-        : pts(0)
+        : pts(AV_NOPTS_VALUE)
         , valid (false)
         , isShowing(false)
     {
-        frame = nullptr;
+        frame = av_frame_alloc();
     }
     void clear(){
         if(frame != nullptr){
-            delete frame;
-            frame = nullptr;
+            av_frame_unref(frame);
         }
-        pts = 0;
+        pts = AV_NOPTS_VALUE;
         valid = false;
         isShowing  = false;
     }
@@ -64,23 +75,23 @@ public :
         }
     }
 
-    QImage* frame; //帧
-    qint64 pts; //播放时间
-    bool valid; //有效的
-    bool isShowing; //显示中
-    QMutex mutex;
+    AVFrame*    frame;      //帧
+    qint64      pts;        //播放时间
+    bool        valid;      //有效的
+    bool        isShowing;  //显示中
+    QMutex      mutex;      //互斥锁
 
 private:
     void release(){
         if(frame != NULL){
-            delete frame;
+            av_frame_unref(frame);
+            av_frame_free(&frame);
             frame = nullptr;
         }
-        pts = 0;
+        pts = AV_NOPTS_VALUE;
         valid = false;
         isShowing  = false;
     }
-
 };
 
 class AVCodecTask : public Task{
@@ -111,39 +122,42 @@ private :
 class AVDecoder: public QObject
 {
      Q_OBJECT
+    friend class AVCodecTask;
 public:
     explicit AVDecoder(QObject *parent = nullptr);
+    void setMediaCallback(AVMediaCallback *media);
 
-private:
-    AVThread mProcessThread;
+public :
+    qint64 requestRenderNextFrame();
+    void load();
+    void setFilename(const QString &source);
+    qint64 getNextFrameTime();
+    int  getRenderListSize();
+
+protected:
+    void init();
+    void decodec();
+    void setFilenameImpl(const QString &source);
 
 signals:
     void send_img(QImage);
 
 private:
-//    AVDictionary dd;
     bool mIsInit = false;
     bool mIsOpenVideoCodec = false;
     AVFormatContext *mFormatCtx = nullptr;
     QString mFilename; // = "udp://@227.70.80.90:2000";
-
     int  mVideoIndex;
-
     AVStream *mVideo = NULL;
-
     AVCodecContext *mVideoCodecCtx = nullptr; //mCodecCtx
     AVCodec *mVideoCodec = nullptr;           //mCodec
     AVPacket *mPacket = nullptr;
     AVPicture  mAVPicture;
-//    VideoFrame vFrame;
     struct SwsContext *mVideoSwsCtx = nullptr; //视频参数转换上下文
 
     QVector<RenderItem *> mRenderList; //渲染队列
     QReadWriteLock mRenderListMutex; //队列操作锁
     int maxRenderListSize = 15; //渲染队列最大数量
-
-    AVFrame *mFrame = nullptr;
-    QSize mSize = QSize(0,0);
 
     //  ----- HW
     QList<AVCodecHWConfig *> mHWConfigList;
@@ -152,30 +166,26 @@ private:
     AVBufferRef *mHWDeviceCtx;
     /** 硬解格式 */
     enum AVPixelFormat mHWPixFormat;
-public :
+
+private:
+    VideoFormat vFormat;
+    QSize mSize = QSize(0,0);
+    AVThread mProcessThread;
+    AVMediaCallback *mCallback = nullptr;
+    AVDefine::AVMediaStatus mStatus = AVDefine::AVMediaStatus_UnknownStatus;
+
+private:
+    void release(bool isDeleted = false);
+    void statusChanged(AVDefine::AVMediaStatus);
+    int decode_write(AVCodecContext *avctx, AVPacket *packet);
     static enum AVPixelFormat get_hw_format(AVCodecContext *ctx, const enum AVPixelFormat *pix_fmts);
 
-    qint64 requestRenderNextFrame();
-
-    void load();
-    void setFilename(const QString &source);
-
-    void init();
-    void release(bool isDeleted = false);
-
-    void decodec();
-    void setFilenameImpl(const QString &source);
-
-    qint64 getNextFrameTime();
-    int  getRenderListSize();
 private :
-    int decode_write(AVCodecContext *avctx, AVPacket *packet);
-
     void initRenderList();
-
     void clearRenderList(bool isDelete = false);
     RenderItem *getInvalidRenderItem();
     RenderItem *getMinRenderItem();
+    RenderItem *getShowRenderItem();
 };
 
 #endif // AVDECODER_H

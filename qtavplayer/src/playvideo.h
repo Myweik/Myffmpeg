@@ -4,25 +4,33 @@
 #include <QObject>
 #include <QWaitCondition>
 #include "avdecoder.h"
-#include "imageprovider.h"
 #include <QQmlApplicationEngine>
+#include "AVMediaCallback.h"
 
 class AVPlayerTask;
 
-class PlayVideo : public QObject
+class PlayVideo : public QObject , public AVMediaCallback
 {
     Q_OBJECT
 public:
     explicit PlayVideo(QObject *parent = nullptr);
     ~PlayVideo();
-    ShowImage* getShowImage() { return mShowImage; }
 
     Q_INVOKABLE void setUrl(QString url);
 
-    void  setQmlApplicationEngine(QQmlEngine &engine);
+    VideoFormat *getRenderData();
+    AVDefine::AVPlayState getPlaybackState();
+
+
 public :
     void requestRender();
+public :
+    void mediaUpdateVideoFrame(void*);
+    void mediaStatusChanged(AVDefine::AVMediaStatus);
+    void mediaHasVideoChanged();
+
 signals:
+    void updateVideoFrame(VideoFormat*);
 
 public slots:
 
@@ -33,8 +41,12 @@ private:
     QMutex mMutex;
 
     AVDecoder *mDecoder;
-    ShowImage *mShowImage;
     AVThread mThread;
+
+
+    /** 播放状态 */
+    AVDefine::AVPlayState mPlaybackState = AVDefine::AVPlayState_Playing;
+    VideoFormat *mRenderData = nullptr;
 };
 
 class AVPlayerTask : public Task{

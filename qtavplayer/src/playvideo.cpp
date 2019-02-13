@@ -1,6 +1,7 @@
 #include "playvideo.h"
 #include <QQmlContext>
 #include <QDateTime>
+#include <QDebug>
 /** 现程实现 */
 void AVPlayerTask::run(){
     switch(command){
@@ -16,16 +17,15 @@ void AVPlayerTask::run(){
     }
 }
 
-PlayVideo::PlayVideo(QObject *parent) : QObject(parent), mDecoder(new AVDecoder), mShowImage(new ShowImage)
+PlayVideo::PlayVideo(QObject *parent) : QObject(parent), mDecoder(new AVDecoder)
 {
-    connect(mDecoder,&AVDecoder::send_img, mShowImage, &ShowImage::sendimage);
+    mDecoder->setMediaCallback(this);
     wakeupPlayer();
 }
 
 PlayVideo::~PlayVideo()
 {
     delete mDecoder;
-    delete mShowImage;
 }
 
 void PlayVideo::setUrl(QString url)
@@ -34,18 +34,20 @@ void PlayVideo::setUrl(QString url)
         mDecoder->setFilename(url);
 }
 
-void PlayVideo::setQmlApplicationEngine(QQmlEngine &engine)
+VideoFormat *PlayVideo::getRenderData()
 {
-    engine.rootContext()->setContextProperty("videoImage",getShowImage());
-    engine.rootContext()->setContextProperty("videoPlay",this);
-    engine.addImageProvider(QLatin1String("videoImg"),getShowImage()->m_pImgProvider);
+     return mRenderData;
+}
 
+AVDefine::AVPlayState PlayVideo::getPlaybackState()
+{
+    return mPlaybackState;
 }
 
 void PlayVideo::requestRender()
 {
-    /* 1-60 2->3 45  >3 30 */
-    if(mDecoder->getRenderListSize() >= 2){
+    /* 1-60  >2 45  >3 30  >4 20  >5 15 */
+    if(mDecoder->getRenderListSize() >= 1){
         static  qint64 lastTime = QDateTime::currentMSecsSinceEpoch();
         int space = QDateTime::currentMSecsSinceEpoch() - lastTime;
 
@@ -53,23 +55,23 @@ void PlayVideo::requestRender()
 //        qint64 nextTime     = mDecoder->getNextFrameTime();
 
         int len = mDecoder->getRenderListSize();
-        if(len > 3){
-//            if(nextTime > currentTime && currentTime != 0)
-//                space = (nextTime - currentTime) / 100 - space ;
-//            else
-                space = 30 - space;
-
+        if(len > 5){
+            space = 10 - space;
+        }else if(len > 3){
+            space = 19 - space;
+//        }else if(len > 2){
+//            space = 25 - space;
         }else if(len > 1){
-            space = 45 - space;
+            space = 35 - space;
         }else{
-            space = 60 - space;
+            space = 50 - space;
         }
 
         if(space <= 0){
-            qDebug() << "----------------------space < 0" << len << space << mDecoder->requestRenderNextFrame() - currentTime;
+            qDebug() << "----------------------space < 0" << len << space;
             space = 1;
         }else{
-            qDebug() << "================>>>>.space > 0" << len << space << mDecoder->requestRenderNextFrame() - currentTime;
+            qDebug() << "================>>>>.space > 0" << len << space;
         }
 
         mMutex.lock();
@@ -77,11 +79,6 @@ void PlayVideo::requestRender()
         mMutex.unlock();
         lastTime = QDateTime::currentMSecsSinceEpoch();
     }
-
-//        qint64 nextTime = mDecoder->nextTime();
-//        mMutex.lock();
-//        mCondition.wait(&mMutex,nextTime - currentTime > 0 && nextTime - currentTime < 40 ? (nextTime - currentTime) : 20);
-//        mMutex.unlock();
     wakeupPlayer();
 }
 
@@ -90,4 +87,21 @@ void PlayVideo::wakeupPlayer()
     if(mDecoder){
         mThread.addTask(new AVPlayerTask(this,AVPlayerTask::AVPlayerTaskCommand_Render));
     }
+}
+
+/* --------------------------------------[ 继承函数 ]----------------------------------- */
+void PlayVideo::mediaUpdateVideoFrame(void *f)
+{
+    mRenderData = (VideoFormat *)f;
+    emit updateVideoFrame(mRenderData);
+}
+
+void PlayVideo::mediaStatusChanged(AVDefine::AVMediaStatus)
+{
+
+}
+
+void PlayVideo::mediaHasVideoChanged()
+{
+
 }

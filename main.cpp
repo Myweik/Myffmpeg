@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <QApplication>
 #include  "qtavplayer/src/playvideo.h"
+#include "qtavplayer/src/AVOutput.h"
 
 void outputMessage(QtMsgType type, const QMessageLogContext &context, const QString &msg)
 {
@@ -63,8 +64,12 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     QQmlApplicationEngine engine;
 
-    PlayVideo* play = new PlayVideo();
-    play->setQmlApplicationEngine(engine);
+//    PlayVideo* play = new PlayVideo();
+//    play->setQmlApplicationEngine(engine);
+
+    AVOutput::registerPlugin();
+
+
     engine.load(QUrl(QStringLiteral("qrc:/ffmpeg/ffmpegView.qml")));
     if (engine.rootObjects().isEmpty())
         return -1;
