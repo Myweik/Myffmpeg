@@ -69,8 +69,8 @@ int main(int argc, char *argv[])
 
     AVOutput::registerPlugin();
 
+    engine.load(QUrl(QStringLiteral("qrc:/qml/main.qml")));
 
-    engine.load(QUrl(QStringLiteral("qrc:/ffmpeg/ffmpegView.qml")));
     if (engine.rootObjects().isEmpty())
         return -1;
 

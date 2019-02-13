@@ -55,7 +55,7 @@ void PlayVideo::requestRender()
 //        qint64 nextTime     = mDecoder->getNextFrameTime();
 
         int len = mDecoder->getRenderListSize();
-        if(len > 5){
+        if(len > 7){
             space = 10 - space;
         }else if(len > 3){
             space = 19 - space;
