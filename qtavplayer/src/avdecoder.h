@@ -168,6 +168,7 @@ private:
     enum AVPixelFormat mHWPixFormat;
 
 private:
+    uchar       _fps = 0;
     VideoFormat vFormat;
     QSize mSize = QSize(0,0);
     AVThread mProcessThread;

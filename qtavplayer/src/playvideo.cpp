@@ -55,16 +55,26 @@ void PlayVideo::requestRender()
 //        qint64 nextTime     = mDecoder->getNextFrameTime();
 
         int len = mDecoder->getRenderListSize();
-        if(len > 7){
-            space = 10 - space;
-        }else if(len > 3){
-            space = 19 - space;
-//        }else if(len > 2){
-//            space = 25 - space;
-        }else if(len > 1){
-            space = 35 - space;
-        }else{
-            space = 50 - space;
+
+
+        if(frameStep != 0){ // 帧步长知道
+            if(len > 7){
+                space = frameStep * 2 / 3 - space;
+            }else if(len > 1){
+                space = frameStep - space;
+            }else{
+                space = frameStep * 3 / 2  - space;
+            }
+        }else{  //fps无效时
+            if(len > 7){
+                space = 10 - space;
+            }else if(len > 2){
+                space = 19 - space;
+            }else if(len > 1){
+                space = 35 - space;
+            }else{
+                space = 50 - space;
+            }
         }
 
         if(space <= 0){
@@ -104,4 +114,12 @@ void PlayVideo::mediaStatusChanged(AVDefine::AVMediaStatus)
 void PlayVideo::mediaHasVideoChanged()
 {
 
+}
+
+void PlayVideo::mediaUpdateFps(uchar fps)
+{
+    _fps = fps;
+    if(_fps != 0 &&_fps <= 80){
+        frameStep = 1000 / _fps;
+    }
 }

@@ -28,6 +28,8 @@ public :
     virtual void mediaHasVideoChanged(){}
     /** 缓冲到的毫秒数 */
     virtual void mediaUpdateBufferSize(int time){}
+    /** 设置FPS */
+    virtual void mediaUpdateFps(uchar fps){}
 };
 
 

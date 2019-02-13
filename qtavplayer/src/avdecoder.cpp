@@ -136,11 +136,13 @@ void AVDecoder::init(){
         //fps
         int fps_num = mFormatCtx->streams[mVideoIndex]->r_frame_rate.num;
         int fps_den = mFormatCtx->streams[mVideoIndex]->r_frame_rate.den;
-        double fps = 0.0;
         if (fps_den > 0) {
-            fps = fps_num / fps_den;
+            _fps = fps_num / fps_den;
+            if(mCallback)
+                mCallback->mediaUpdateFps(_fps);
+
         }
-        qDebug() << "---------------------------fps  mVideoCodec->codec_id"  << fps << mVideoCodec->id;
+        qDebug() << "---------------------------fps  mVideoCodec->codec_id"  << _fps << mVideoCodec->id;
 
         //选择硬解
         mHWConfigList.clear();

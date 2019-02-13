@@ -28,6 +28,7 @@ public :
     void mediaUpdateVideoFrame(void*);
     void mediaStatusChanged(AVDefine::AVMediaStatus);
     void mediaHasVideoChanged();
+    void mediaUpdateFps(uchar fps);
 
 signals:
     void updateVideoFrame(VideoFormat*);
@@ -37,12 +38,14 @@ public slots:
 private:
     void wakeupPlayer();
 
+private:
+    uchar       _fps = 0;    //fps
+    uchar       frameStep = 0;
     QWaitCondition mCondition;
     QMutex mMutex;
 
     AVDecoder *mDecoder;
     AVThread mThread;
-
 
     /** 播放状态 */
     AVDefine::AVPlayState mPlaybackState = AVDefine::AVPlayState_Playing;
