@@ -1,6 +1,7 @@
 import QtQuick 2.5
 import QtQuick.Window 2.2
-
+import QtQuick.Controls 1.4
+import QtQuick.Layouts 1.2
 Window {
     visible: true
     width: 960
@@ -8,9 +9,23 @@ Window {
     title: qsTr("Hello World")
 
     Loader {
+        id: play
         anchors.fill:   parent
         asynchronous: true
         visible:      true
         source:      "qrc:/ffmpeg/ffmpegView.qml"
     }
+
+
+        RowLayout {
+              Button {
+                  text: "Ok"
+                  onClicked: play.visible = true
+              }
+              Button {
+                  text: "Cancel"
+                  onClicked: play.visible = false
+              }
+          }
+
 }

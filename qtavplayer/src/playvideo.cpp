@@ -47,24 +47,35 @@ AVDefine::AVPlayState PlayVideo::getPlaybackState()
 void PlayVideo::requestRender()
 {
     /* 1-60  >2 45  >3 30  >4 20  >5 15 */
-    if(mDecoder->getRenderListSize() >= 2){
+    if(mDecoder->getRenderListSize() >= 3){
         static  qint64 lastTime = QDateTime::currentMSecsSinceEpoch();
         int space = QDateTime::currentMSecsSinceEpoch() - lastTime;
-
         qint64 currentTime  = mDecoder->requestRenderNextFrame();
-//        qint64 nextTime     = mDecoder->getNextFrameTime();
+        qint64 nextTime     = mDecoder->getNextFrameTime();
+        int len = mDecoder->getRenderListSize(); //有一帧是处于显示的  不可用
 
-        int len = mDecoder->getRenderListSize();
+        qDebug() << "-------------------------------requestRender" << len  <<  currentTime << nextTime << nextTime - currentTime;
 
         if(frameStep != 0){ // 帧步长知道
-            if(len > 7){
-                space = frameStep * 2 / 3 - space;
-            }else if(len > 2){
-                space = frameStep - space + 1;
-            }else{
-                space = frameStep * 3 / 2  - space;
+            int space2 = nextTime - currentTime;
+            if(frameStep * 2 / 3 < space2 && space2 > frameStep * 3 / 2){  //根据时间搓播放
+                if(len > 6){
+                    space = space2 * 2 / 3 - space + 2;
+                }else/* if(len >= 2)*/{
+                    space = space2 - space;
+                }/*else{
+//                    space = space2 * 3 / 2  - space;
+                }*/
+            }else{                                                          //根据fps推算播放
+                if(len > 5){
+                    space = frameStep * 2 / 3 - space;
+                }else if(len >= 2){
+                    space = frameStep - space + 2;
+                }else{
+                    space = frameStep * 3 / 2  - space;
+                }
             }
-        }else{  //fps无效时
+        }else{  //fps无效时                                                //根据缓存长度播放
             if(len > 7){
                 space = 10 - space;
             }else if(len > 2){
@@ -77,13 +88,10 @@ void PlayVideo::requestRender()
         }
 
         if(space <= 0){
-//            qDebug() << "----------------------space < 0" << len << space;
             space = 1;
-        }else{
-//            qDebug() << "================>>>>.space > 0" << len << space;
         }
-        if(len <= 1 || len >4)
-            qDebug() << "================>>>>.space > 0" << len << space;
+//        if(len <= 1 || len >4)
+//            qDebug() << "================>>>>.space > 0" << len << space;
 
         mMutex.lock();
         mCondition.wait(&mMutex, space);

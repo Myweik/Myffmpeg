@@ -12,6 +12,7 @@ class AVPlayerTask;
 class PlayVideo : public QObject , public AVMediaCallback
 {
     Q_OBJECT
+    friend class AVPlayerTask;
 public:
     explicit PlayVideo(QObject *parent = nullptr);
     ~PlayVideo();
@@ -20,9 +21,7 @@ public:
 
     VideoFormat *getRenderData();
     AVDefine::AVPlayState getPlaybackState();
-
-
-public :
+protected :
     void requestRender();
 public :
     void mediaUpdateVideoFrame(void*);
