@@ -47,7 +47,7 @@ AVDefine::AVPlayState PlayVideo::getPlaybackState()
 void PlayVideo::requestRender()
 {
     /* 1-60  >2 45  >3 30  >4 20  >5 15 */
-    if(mDecoder->getRenderListSize() >= 1){
+    if(mDecoder->getRenderListSize() >= 2){
         static  qint64 lastTime = QDateTime::currentMSecsSinceEpoch();
         int space = QDateTime::currentMSecsSinceEpoch() - lastTime;
 
@@ -56,12 +56,11 @@ void PlayVideo::requestRender()
 
         int len = mDecoder->getRenderListSize();
 
-
         if(frameStep != 0){ // 帧步长知道
             if(len > 7){
                 space = frameStep * 2 / 3 - space;
-            }else if(len > 1){
-                space = frameStep - space;
+            }else if(len > 2){
+                space = frameStep - space + 1;
             }else{
                 space = frameStep * 3 / 2  - space;
             }
@@ -78,11 +77,13 @@ void PlayVideo::requestRender()
         }
 
         if(space <= 0){
-            qDebug() << "----------------------space < 0" << len << space;
+//            qDebug() << "----------------------space < 0" << len << space;
             space = 1;
         }else{
-            qDebug() << "================>>>>.space > 0" << len << space;
+//            qDebug() << "================>>>>.space > 0" << len << space;
         }
+        if(len <= 1 || len >4)
+            qDebug() << "================>>>>.space > 0" << len << space;
 
         mMutex.lock();
         mCondition.wait(&mMutex, space);
@@ -118,6 +119,7 @@ void PlayVideo::mediaHasVideoChanged()
 
 void PlayVideo::mediaUpdateFps(uchar fps)
 {
+    qDebug() << "---------------------------mediaUpdateFps fps"  << fps;
     _fps = fps;
     if(_fps != 0 &&_fps <= 80){
         frameStep = 1000 / _fps;

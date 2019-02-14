@@ -39,13 +39,10 @@ void AVCodecTask::run(){
         break;
     case AVCodecTaskCommand_SetDecodecMode :
         break;
-
     case AVCodecTaskCommand_ShowFrameByPosition :   //按位置显示帧
         break;
     }
 }
-
-
 
 AVDecoder::AVDecoder(QObject *parent) : QObject(parent)
 {
@@ -79,8 +76,7 @@ static int hw_decoder_init(AVCodecContext *ctx, AVBufferRef *hw_device_ctx, cons
     ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
 
     //    mVideoCodecCtx->hw_device_ctx = av_buffer_ref(mHWDeviceCtx); //创建对avbuffer的新引用
-    //                        mHWFrame = av_frame_alloc(); //分配空间
-    //                        changeRenderItemSize(mVideoCodecCtx->width,mVideoCodecCtx->height,(AVPixelFormat)mHWPixFormat); //更改呈现项大小
+    //    hangeRenderItemSize(mVideoCodecCtx->width,mVideoCodecCtx->height,(AVPixelFormat)mHWPixFormat); //更改呈现项大小
     return err;
 }
 
@@ -90,6 +86,7 @@ void AVDecoder::init(){
     mIsInit = true;
     statusChanged(AVDefine::AVMediaStatus_Loading);
 
+    /* ----------------------------只是打印出来看看--------------------------- */
     static QStringList codecs;
     AVCodec* c = NULL;
     while ((c=av_codec_next(c))) {
@@ -100,7 +97,7 @@ void AVDecoder::init(){
     qDebug() << "-----------------------codecs.size" << codecs.size() << codecs;
 
     AVDictionary* options = NULL;
-    av_dict_set(&options, "buffer_size", "102400", 0);  //增大“buffer_size”
+    av_dict_set(&options, "buffer_size", "10240", 0);  //增大“buffer_size”
 //    av_dict_set(&options, "max_delay", "500000", 0);
 //    av_dict_set(&options, "stimeout", "20000000", 0);  //设置超时断开连接时间
 //    av_dict_set(&options, "rtsp_transport", "tcp", 0);  //以udp方式打开，如果以tcp方式打开将udp替换为tcp
@@ -142,7 +139,6 @@ void AVDecoder::init(){
                 mCallback->mediaUpdateFps(_fps);
 
         }
-        qDebug() << "---------------------------fps  mVideoCodec->codec_id"  << _fps << mVideoCodec->id;
 
         //选择硬解
         mHWConfigList.clear();
@@ -250,8 +246,7 @@ void AVDecoder::release(bool isDeleted){
         mVideoSwsCtx = NULL;
     }
 
-    //    mStatus = AVDefine::AVMediaStatus_UnknownStatus;
-
+    statusChanged(AVDefine::AVMediaStatus_UnknownStatus);
     clearRenderList(isDeleted);
 }
 
@@ -300,7 +295,6 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
                         frame->height,
                         AV_PIX_FMT_YUV420P,
                         SWS_BICUBIC,NULL,NULL,NULL);
-//            avpicture_alloc(&mAVPicture,AV_PIX_FMT_RGB24,frame->width,frame->height/*960, 540*/);
         }
         item->mutex.lock();
         if (frame->format == mHWPixFormat) { // 硬解拷贝
@@ -354,7 +348,6 @@ void AVDecoder::decodec(){
     if (mPacket->stream_index == mVideoIndex) {
         if(mUseHw){ //硬解
             int ret = decode_write(mVideoCodecCtx, mPacket);
-//            qDebug() << "----------------------------decode_write" << ret << getRenderListSize();
         }
     }
     av_packet_unref(mPacket);

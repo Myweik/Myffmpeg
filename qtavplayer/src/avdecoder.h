@@ -136,6 +136,7 @@ public :
 
 protected:
     void init();
+    // +加一个获取队列  数据的
     void decodec();
     void setFilenameImpl(const QString &source);
 
@@ -152,7 +153,6 @@ private:
     AVCodecContext *mVideoCodecCtx = nullptr; //mCodecCtx
     AVCodec *mVideoCodec = nullptr;           //mCodec
     AVPacket *mPacket = nullptr;
-    AVPicture  mAVPicture;
     struct SwsContext *mVideoSwsCtx = nullptr; //视频参数转换上下文
 
     QVector<RenderItem *> mRenderList; //渲染队列
