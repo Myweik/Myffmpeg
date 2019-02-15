@@ -70,9 +70,10 @@ public :
 
 protected:
     void init();
-    // +加一个获取队列  数据的
     void getPacket();
     void decodec();
+    void softDecodec();
+    void hwDecodec();
     void setFilenameImpl(const QString &source);
 
 private:
@@ -95,19 +96,21 @@ private :
 private:
     bool mIsInit = false;
     bool mIsOpenVideoCodec = false;
-    AVFormatContext *mFormatCtx = nullptr;
     QString mFilename; // = "udp://@227.70.80.90:2000";
     int  mVideoIndex;
     AVStream *mVideo = NULL;
+    AVFormatContext *mFormatCtx = nullptr;
     AVCodecContext *mVideoCodecCtx = nullptr; //mCodecCtx
     AVCodec *mVideoCodec = nullptr;           //mCodec
-    AVPacket *mPacket = nullptr;
     struct SwsContext *mVideoSwsCtx = nullptr; //视频参数转换上下文
 
     PacketQueue* videoq = nullptr;      //为解码的视频原始包
     QVector<RenderItem *> mRenderList;  //渲染队列
     QReadWriteLock mRenderListMutex;    //队列操作锁
     int maxRenderListSize = 15;         //渲染队列最大数量
+
+    /* 各种资源锁 */
+    QReadWriteLock mVideoCodecCtxMutex;
 
     //  ----- HW
     QList<AVCodecHWConfig *> mHWConfigList;
@@ -182,7 +185,8 @@ public :
     qint64      pts;        //播放时间
     bool        valid;      //有效的
     bool        isShowing;  //显示中
-    QMutex      mutex;      //互斥锁
+    QReadWriteLock mutex;   //读写锁
+    QMutex      mutexLock;  //互斥锁
 
 private:
     void release(){
@@ -205,7 +209,7 @@ public :
     AVRational time_base;
 
 private :
-    QMutex mutex;
+    QReadWriteLock mutex;
 public :
 
     void setTimeBase(AVRational &timebase){
@@ -220,14 +224,14 @@ public :
     void put(AVPacket *pkt){
         if(pkt == NULL)
             return;
-        mutex.lock();
+        mutex.lockForWrite();
         packets.push_back(pkt);
         mutex.unlock();
     }
 
     AVPacket *get(){
         AVPacket *pkt = NULL;
-        mutex.lock();
+        mutex.lockForWrite();
         if(packets.size() > 0){
             pkt = packets.front();
             packets.pop_front();
@@ -237,7 +241,7 @@ public :
     }
 
     void removeToTime(int time){
-        mutex.lock();
+        mutex.lockForRead();
         QList<AVPacket *>::iterator begin = packets.begin();
         QList<AVPacket *>::iterator end = packets.end();
         while(begin != end){
@@ -257,7 +261,7 @@ public :
 
     int diffTime(){
         int time = 0;
-        mutex.lock();
+        mutex.lockForRead();
         if(packets.size() > 1){
             int start = av_q2d(time_base) * packets.front()->pts * 1000;
             int end = av_q2d(time_base) * packets.back()->pts * 1000;
@@ -269,7 +273,7 @@ public :
 
     int startTime(){
         int time = -1;
-        mutex.lock();
+        mutex.lockForRead();
         if(packets.size() > 0){
             time = av_q2d(time_base) * packets.front()->pts * 1000;
         }
@@ -278,14 +282,14 @@ public :
     }
 
     int size(){
-        mutex.lock();
+        mutex.lockForRead();
         int len = packets.size();
         mutex.unlock();
         return len;
     }
 
     void release(){
-        mutex.lock();
+        mutex.lockForRead();
         QList<AVPacket *>::iterator begin = packets.begin();
         QList<AVPacket *>::iterator end = packets.end();
         while(begin != end){
