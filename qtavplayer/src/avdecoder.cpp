@@ -75,7 +75,7 @@ void AVCodecTask::run(){
 AVDecoder::AVDecoder(QObject *parent) : QObject(parent), videoq(new PacketQueue)
 {
 #ifdef LIBAVUTIL_VERSION_MAJOR
-#if (LIBAVUTIL_VERSION_MAJOR <= 56)
+#if (LIBAVUTIL_VERSION_MAJOR < 56)
     avcodec_register_all();
     avfilter_register_all();
     av_register_all();
@@ -167,15 +167,15 @@ void AVDecoder::init(){
 //    }
 //    qDebug() << "-----------------------codecs.size" << codecs.size() << codecs;
 
-    AVDictionary* options = NULL;
-    av_dict_set(&options, "buffer_size", "10240", 0);  //增大“buffer_size”
+//    AVDictionary* options = NULL;
+//    av_dict_set(&options, "buffer_size", "10240", 0);  //增大“buffer_size”
 //    av_dict_set(&options, "max_delay", "500000", 0);
 //    av_dict_set(&options, "stimeout", "20000000", 0);  //设置超时断开连接时间
 //    av_dict_set(&options, "rtsp_transport", "tcp", 0);  //以udp方式打开，如果以tcp方式打开将udp替换为tcp
 
     //寻找视频
     mFormatCtx = avformat_alloc_context();
-    if(avformat_open_input(&mFormatCtx, mFilename.toStdString().c_str(), NULL, &options) != 0) //打开视频
+    if(avformat_open_input(&mFormatCtx, mFilename.toStdString().c_str(), NULL, NULL) != 0) //打开视频
     {
         qDebug() << "media open error : " << mFilename.toStdString().data();
         statusChanged(AVDefine::AVMediaStatus_NoMedia);
@@ -235,11 +235,11 @@ void AVDecoder::init(){
             if (avcodec_parameters_to_context(mVideoCodecCtx, mVideo->codecpar) < 0)
                 return;
 
+            clearRenderList();
             if(mVideoCodecCtx != NULL){
                 if(avcodec_is_open(mVideoCodecCtx))
                     avcodec_close(mVideoCodecCtx);
             }
-            clearRenderList();
 //            mHWConfigList.clear();
             mVideoCodecCtxMutex.lockForWrite();
             if(mHWConfigList.size() > 0){
@@ -384,6 +384,7 @@ void AVDecoder::init(){
 
 void AVDecoder::getPacket()
 {
+//    qDebug() << "------------------------------getPacket" <<  mIsInit << mIsOpenVideoCodec;
     if(!mIsInit || !mIsOpenVideoCodec){ //必须初始化
         statusChanged(AVDefine::AVMediaStatus_InvalidMedia);
         return;
@@ -429,86 +430,18 @@ void AVDecoder::getPacket()
         //                  pkt = NULL;
         //                  mIsVideoSeeked = false;
         videoq->put(pkt);
-//        qDebug() << "------------------------------getPacket" << pkt->stream_index <<  mVideoIndex << pkt->size <<  videoq->size()  << currentTime << QDateTime::currentMSecsSinceEpoch();
+//       qDebug() << "------------------------------getPacket" << pkt->stream_index <<  mVideoIndex << pkt->size <<  videoq->size()  << currentTime << QDateTime::currentMSecsSinceEpoch();
       }
     getPacketTask();
 }
 
 void AVDecoder::decodec()
 {
-    if(mUseHw){
-        hwDecodec();
-    }else{
-        softDecodec();
-    }
-}
-
-void AVDecoder::softDecodec()
-{
-    if(videoq->size() <= 0) {
+    if(videoq->size() <= 0 || getRenderListSize() >= maxRenderListSize) {
         decodecTask();
         return;
     }
-    AVPacket *pkt = videoq->get();
 
-    if (pkt->stream_index == mVideoIndex) {
-        RenderItem *item = getInvalidRenderItem();
-        if(!item){
-            decodecTask();
-            return;
-        }
-        AVFrame *frame = item->frame;
-        item->mutex.lockForWrite();
-        int  ret, got_picture;
-        ret = avcodec_decode_video2(mVideoCodecCtx, frame, &got_picture, pkt);
-        if(ret < 0){
-            goto fail;
-        }
-         if (got_picture) {
-             if(mSize != QSize(frame->width, frame->height) || mPixFormat != mVideoCodecCtx->pix_fmt){
-                 /// 重要信息便跟 需要转码时重启
-                 //                if(mVideoSwsCtx)
-                 //                    reboot();
-             }
-             if(mVideoSwsCtx){
-                 ret = sws_scale(mVideoSwsCtx,
-                                 frame->data,
-                                 frame->linesize,
-                                 0,
-                                 frame->height,
-                                 item->frame->data,
-                                 item->frame->linesize);
-
-                 if(ret < 0){
-                     qWarning() << "Error sws_scale";
-                     goto fail;
-                 }
-             }
-
-             item->pts   = item->frame->pts;
-             item->valid = true;
-             if(item->frame->pts != AV_NOPTS_VALUE)
-                 item->pts = av_q2d(mFormatCtx->streams[mVideoIndex]->time_base ) * item->frame->pts * 1000;
-         }
-
-    item->mutex.unlock();
-    }
-
-fail:
-    if(pkt){
-        av_packet_unref(pkt);
-        av_freep(pkt);
-    }
-
-    decodecTask();
-}
-
-void AVDecoder::hwDecodec()
-{
-    if(videoq->size() <= 0) {
-        decodecTask();
-        return;
-    }
     AVPacket *pkt = videoq->get();
     if (pkt->stream_index == mVideoIndex) {
         int ret = decode_write(mVideoCodecCtx, pkt);
@@ -518,6 +451,7 @@ void AVDecoder::hwDecodec()
     av_freep(pkt);
     decodecTask();
 }
+
 
 int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
 {
@@ -539,14 +473,11 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
         return AVERROR(ENOMEM);
     }
     sw_frame = av_frame_alloc();
-    frame = item->frame;
+    frame = sw_frame;
 
-    if(mUseHw){
-        frame = sw_frame;
-    }
-
-    while (1) {
-        ret = avcodec_receive_frame(avctx, frame);
+    while (avcodec_receive_frame(avctx, frame) == 0) {
+        ret = 0;
+//        ret = avcodec_receive_frame(avctx, frame);
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
                 av_frame_free(&sw_frame);
                 mVideoCodecCtxMutex.unlock();
@@ -586,6 +517,8 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
                     item->mutex.unlock();
                     goto fail;
                 }
+            }else{  //内存移动 -- 不然会被释放
+                av_frame_move_ref(item->frame, frame);
             }
         }
 
@@ -594,14 +527,16 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
         if(item->frame->pts != AV_NOPTS_VALUE)
             item->pts = av_q2d(mFormatCtx->streams[mVideoIndex]->time_base ) * item->frame->pts * 1000;
         item->mutex.unlock();
-    fail:
-        av_frame_unref(sw_frame);
-        av_frame_free(&sw_frame);
-        mVideoCodecCtxMutex.unlock();
-
-        if (ret < 0)
-            return ret;
     }
+
+fail:
+    av_frame_unref(sw_frame);
+    av_frame_free(&sw_frame);
+    mVideoCodecCtxMutex.unlock();
+
+    return ret;
+//    if (ret < 0)
+//        return ret;
 }
 
 void AVDecoder::setFilenameImpl(const QString &source){

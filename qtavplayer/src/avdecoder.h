@@ -72,8 +72,6 @@ protected:
     void init();
     void getPacket();
     void decodec();
-    void softDecodec();
-    void hwDecodec();
     void setFilenameImpl(const QString &source);
 
 private:
