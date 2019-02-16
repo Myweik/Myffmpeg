@@ -287,7 +287,7 @@ public :
     }
 
     void release(){
-        mutex.lockForRead();
+        mutex.lockForWrite();
         QList<AVPacket *>::iterator begin = packets.begin();
         QList<AVPacket *>::iterator end = packets.end();
         while(begin != end){

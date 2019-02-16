@@ -431,12 +431,16 @@ void AVDecoder::getPacket()
         //                  mIsVideoSeeked = false;
         videoq->put(pkt);
 //       qDebug() << "------------------------------getPacket" << pkt->stream_index <<  mVideoIndex << pkt->size <<  videoq->size()  << currentTime << QDateTime::currentMSecsSinceEpoch();
-      }
+    }else {
+        av_packet_unref(pkt);
+        av_freep(pkt);
+    }
     getPacketTask();
 }
 
 void AVDecoder::decodec()
 {
+//    return;
     if(videoq->size() <= 0 || getRenderListSize() >= maxRenderListSize) {
         decodecTask();
         return;
@@ -458,6 +462,14 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
     AVFrame *frame = NULL, *sw_frame = NULL;;
     int ret = 0;
     mVideoCodecCtxMutex.lockForRead();
+
+    RenderItem* item = getInvalidRenderItem();
+    if(!item) {
+        mVideoCodecCtxMutex.unlock();
+        qDebug() << "-------------------------decode_write lost one AVFrame" << getRenderListSize();
+        return AVERROR(ENOMEM);
+    }
+
     ret = avcodec_send_packet(avctx, packet);  // ret = avcodec_decode_video2(pCodecCtx, pFrame, &got_picture,packet);
     if (ret < 0) {
         qWarning() << "Error during decoding";
@@ -466,12 +478,6 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
         return ret;
     }
 
-    RenderItem* item = getInvalidRenderItem();
-    if(!item) {
-        mVideoCodecCtxMutex.unlock();
-        qDebug() << "-------------------------decode_write lost one AVFrame" << getRenderListSize();
-        return AVERROR(ENOMEM);
-    }
     sw_frame = av_frame_alloc();
     frame = sw_frame;
 
@@ -479,8 +485,9 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
         ret = 0;
 //        ret = avcodec_receive_frame(avctx, frame);
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-                av_frame_free(&sw_frame);
-                mVideoCodecCtxMutex.unlock();
+            av_frame_unref(sw_frame);
+            av_frame_free(&sw_frame);
+            mVideoCodecCtxMutex.unlock();
             return 0;
         } else if (ret < 0) {
             qWarning() << "Error while decoding";
@@ -490,12 +497,14 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
         item->mutex.lockForWrite();
         if (mUseHw) { // 硬解拷贝
             /* retrieve data from GPU to CPU */
-            if (frame->format != mHWPixFormat || (ret = av_hwframe_transfer_data(item->frame, frame, 0)) < 0) {
-                qWarning() << "Error transferring the data to system memory";
-                item->mutex.unlock();
-                goto fail;
-            }else
-                av_frame_copy_props(item->frame, frame);
+            if(frame->format == mHWPixFormat ){
+                if ((ret = av_hwframe_transfer_data(item->frame, frame, 0)) < 0) {
+                    qWarning() << "Error transferring the data to system memory";
+                    item->mutex.unlock();
+                    goto fail;
+                }else
+                    av_frame_copy_props(item->frame, frame);
+            }
         } else{ //软解 转格式  --- [软解还没调好]  >> BUG 函数结束时 item->frame被清空 导致无数据
             if(mSize != QSize(frame->width, frame->height) || mPixFormat != mVideoCodecCtx->pix_fmt){
                 /// 重要信息便跟 需要转码时重启
@@ -566,7 +575,6 @@ void AVDecoder::release(bool isDeleted){
 
     mDecodeThread.clearAllTask(); //清除所有任务
     mProcessThread.clearAllTask(); //清除所有任务
-    QThread::msleep(2);
 
     mVideoCodecCtxMutex.lockForWrite();
     if(mVideoCodecCtx != NULL){
@@ -596,7 +604,7 @@ void AVDecoder::release(bool isDeleted){
     if(videoq)
         videoq->release();
     clearRenderList(isDeleted);
-     statusChanged(AVDefine::AVMediaStatus_UnknownStatus);
+    statusChanged(AVDefine::AVMediaStatus_UnknownStatus);
 }
 
 /* ------------------------显示函数---------------------------------- */

@@ -47,20 +47,21 @@ AVDefine::AVPlayState PlayVideo::getPlaybackState()
 void PlayVideo::requestRender()
 {
     /* 1-60  >2 45  >3 30  >4 20  >5 15 */
-    if(mDecoder->getRenderListSize() >= 3){
+    int lent = mDecoder->getRenderListSize();
+    if(lent >= 3){
         static  qint64 lastTime = QDateTime::currentMSecsSinceEpoch();
         int space = QDateTime::currentMSecsSinceEpoch() - lastTime;
         qint64 currentTime  = mDecoder->requestRenderNextFrame();
         qint64 nextTime     = mDecoder->getNextFrameTime();
         int len = mDecoder->getRenderListSize(); //有一帧是处于显示的  不可用
 
-        qDebug() << "-------------------------------requestRender" << len  <<  currentTime << nextTime << nextTime - currentTime;
+        qDebug() << "-------------------------------requestRender" << lent << len  <<  currentTime << nextTime << nextTime - currentTime;
 
         if(frameStep != 0){ // 帧步长知道
             int space2 = nextTime - currentTime;
             if(frameStep * 2 / 3 < space2 && space2 > frameStep * 3 / 2){  //根据时间搓播放
-                if(len > 6){
-                    space = space2 * 2 / 3 - space + 2;
+                if(len >= 6){
+                    space = space2 * 2 / 3 - space + 1;
                 }else/* if(len >= 2)*/{
                     space = space2 - space;
                 }/*else{
@@ -89,6 +90,8 @@ void PlayVideo::requestRender()
 
         if(space <= 0){
             space = 1;
+        }else if(space > 50){
+             space = 50;
         }
 //        if(len <= 1 || len >4)
 //            qDebug() << "================>>>>.space > 0" << len << space;
