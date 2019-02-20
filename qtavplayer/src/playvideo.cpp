@@ -48,25 +48,35 @@ void PlayVideo::requestRender()
 {
     /* 1-60  >2 45  >3 30  >4 20  >5 15 */
     int lent = mDecoder->getRenderListSize();
-    if(lent >= 3){
+    if(lent >= 2){
         static  qint64 lastTime = QDateTime::currentMSecsSinceEpoch();
         int space = QDateTime::currentMSecsSinceEpoch() - lastTime;
         qint64 currentTime  = mDecoder->requestRenderNextFrame();
+
         qint64 nextTime     = mDecoder->getNextFrameTime();
         int len = mDecoder->getRenderListSize(); //有一帧是处于显示的  不可用
+        int space2 = nextTime - currentTime;
 
-        qDebug() << "-------------------------------requestRender" << lent << len  <<  currentTime << nextTime << nextTime - currentTime;
+        if(len >= _cacheFrame){
+            space = 5;
+        }else if(len >= _cacheFrame - 1){
+            space = space2 * 2 / 3 - space;
+        }else{
+            space = space2 - space + 1;
+        }
+        if(nextTime ==0){
+            space= 1000 / _fps;
+        }
 
+        /*
         if(frameStep != 0){ // 帧步长知道
             int space2 = nextTime - currentTime;
             if(frameStep * 2 / 3 < space2 && space2 > frameStep * 3 / 2){  //根据时间搓播放
-                if(len >= 6){
-                    space = space2 * 2 / 3 - space + 1;
-                }else/* if(len >= 2)*/{
-                    space = space2 - space;
-                }/*else{
-//                    space = space2 * 3 / 2  - space;
-                }*/
+                if(len >= _cacheFrame - 1){
+                    space = space2 * 2 / 3 - space;
+                }else/* if(len >= 2) * /{
+                    space = space2 - space + 1;
+                }
             }else{                                                          //根据fps推算播放
                 if(len > 5){
                     space = frameStep * 2 / 3 - space;
@@ -93,9 +103,24 @@ void PlayVideo::requestRender()
         }else if(space > 50){
              space = 50;
         }
-//        if(len <= 1 || len >4)
-//            qDebug() << "================>>>>.space > 0" << len << space;
+        if(len > _cacheFrame){
+            space = 1;
+        }
 
+
+
+
+        */
+        if(space <= 0){
+            space = 1;
+        }else if(space > 50){
+             space = 50;
+        }
+//        if(len > _cacheFrame){
+//            space = 1;
+//        }
+
+         qDebug() << "-------------------------------requestRender" << _cacheFrame << lent << len  <<  currentTime /*<< nextTime << nextTime - currentTime*/ << space;
         mMutex.lock();
         mCondition.wait(&mMutex, space);
         mMutex.unlock();
@@ -134,5 +159,9 @@ void PlayVideo::mediaUpdateFps(uchar fps)
     _fps = fps;
     if(_fps != 0 &&_fps <= 80){
         frameStep = 1000 / _fps;
+
+        _cacheFrame = _cache / frameStep + 1;
+        if(_cacheFrame < 4)
+            _cacheFrame = 4;
     }
 }

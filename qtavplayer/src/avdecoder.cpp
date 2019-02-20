@@ -167,15 +167,21 @@ void AVDecoder::init(){
 //    }
 //    qDebug() << "-----------------------codecs.size" << codecs.size() << codecs;
 
-//    AVDictionary* options = NULL;
+
+
+    AVDictionary* options = NULL;
 //    av_dict_set(&options, "buffer_size", "10240", 0);  //增大“buffer_size”
 //    av_dict_set(&options, "max_delay", "500000", 0);
 //    av_dict_set(&options, "stimeout", "20000000", 0);  //设置超时断开连接时间
-//    av_dict_set(&options, "rtsp_transport", "tcp", 0);  //以udp方式打开，如果以tcp方式打开将udp替换为tcp
+
+    av_dict_set(&options, "preset", "ultrafast ", 0); // av_opt_set(pCodecCtx->priv_data,"preset","fast",0);
+    av_dict_set(&options, "tune", "zerolatency", 0);
+
+//    av_dict_set(&options, "rtsp_transport", "udp", 0);  //以udp方式打开，如果以tcp方式打开将udp替换为tcp
 
     //寻找视频
     mFormatCtx = avformat_alloc_context();
-    if(avformat_open_input(&mFormatCtx, mFilename.toStdString().c_str(), NULL, NULL) != 0) //打开视频
+    if(avformat_open_input(&mFormatCtx, mFilename.toStdString().c_str(), NULL, &options) != 0) //打开视频
     {
         qDebug() << "media open error : " << mFilename.toStdString().data();
         statusChanged(AVDefine::AVMediaStatus_NoMedia);
@@ -183,6 +189,9 @@ void AVDecoder::init(){
         return;
     }
     mIsInit = false;
+
+   mFormatCtx->probesize = 500000;  //
+   qDebug() << "------------mFormatCtx->probesize  mFormatCtx->max_analyze_duration2"<< mFormatCtx->probesize << mFormatCtx->max_analyze_duration;
 
     //     qDebug()<<"file name is ==="<< QString(mFormatCtx->filename);
     //     qDebug()<<"the length is ==="<<mFormatCtx->duration/1000000;
@@ -430,7 +439,7 @@ void AVDecoder::getPacket()
         //                  pkt = NULL;
         //                  mIsVideoSeeked = false;
         videoq->put(pkt);
-//       qDebug() << "------------------------------getPacket" << pkt->stream_index <<  mVideoIndex << pkt->size <<  videoq->size()  << currentTime << QDateTime::currentMSecsSinceEpoch();
+//       qDebug() << "------------------------------getPacket" << videoq->size()  << currentTime << QDateTime::currentMSecsSinceEpoch();
     }else {
         av_packet_unref(pkt);
         av_freep(pkt);
@@ -441,6 +450,7 @@ void AVDecoder::getPacket()
 void AVDecoder::decodec()
 {
 //    return;
+//    qDebug() << "------------------------------decodec1" << videoq->size() << getRenderListSize();
     if(videoq->size() <= 0 || getRenderListSize() >= maxRenderListSize) {
         decodecTask();
         return;
@@ -449,7 +459,7 @@ void AVDecoder::decodec()
     AVPacket *pkt = videoq->get();
     if (pkt->stream_index == mVideoIndex) {
         int ret = decode_write(mVideoCodecCtx, pkt);
-//        qDebug() << "------------------------------decodec" << ret << mUseHw << videoq->size() << getRenderListSize();
+//        qDebug() << "------------------------------decodec2" << ret<<videoq->size() << getRenderListSize();
     }
     av_packet_unref(pkt);
     av_freep(pkt);

@@ -1,4 +1,5 @@
 #include "AVThread.h"
+#include <Windows.h>
 AVThread::AVThread()
     : mIsRunning(false)
 {
@@ -99,6 +100,13 @@ Task *AVThread::getTask(){
 
 void AVThread::run(){
     mIsRunning = true;
+    SYSTEM_INFO info;
+    GetSystemInfo(&info);
+//printf("Number of processors: %d.\n", info.dwNumberOfProcessors);
+//    DWORD_PTR SetThreadAffinityMask(HANDLE hThread, DWORD_PTR dwThreadAffinityMask);
+    if(info.dwNumberOfProcessors == 4)
+        SetThreadAffinityMask(currentThread(), 0x08);
+
     while(mIsRunning){
         Task * task = getTask();
         if(task == NULL){
