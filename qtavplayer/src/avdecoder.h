@@ -70,6 +70,7 @@ public :
 
 protected:
     void init();
+
     void getPacket();
     void decodec();
     void setFilenameImpl(const QString &source);
@@ -83,6 +84,10 @@ private:
     int decode_write(AVCodecContext *avctx, AVPacket *packet);
     static enum AVPixelFormat get_hw_format(AVCodecContext *ctx, const enum AVPixelFormat *pix_fmts);
 private :
+    /* 推流 */
+    void initEncodec();
+    int  OpenOutput(string outUrl);
+
     void initRenderList();
     void clearRenderList(bool isDelete = false);
     RenderItem *getInvalidRenderItem();
@@ -92,6 +97,7 @@ private :
     void changeRenderItemSize(int width,int height,AVPixelFormat format);
 
 private:
+    bool mIsInitEC = false;
     bool mIsInit = false;
     bool mIsOpenVideoCodec = false;
     QString mFilename; // = "udp://@227.70.80.90:2000";

@@ -106,19 +106,12 @@ void PlayVideo::requestRender()
         if(len > _cacheFrame){
             space = 1;
         }
-
-
-
-
         */
         if(space <= 0){
             space = 1;
         }else if(space > 50){
              space = 50;
         }
-//        if(len > _cacheFrame){
-//            space = 1;
-//        }
 
          qDebug() << "-------------------------------requestRender" << _cacheFrame << lent << len  <<  currentTime /*<< nextTime << nextTime - currentTime*/ << space;
         mMutex.lock();

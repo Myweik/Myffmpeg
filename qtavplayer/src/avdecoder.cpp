@@ -3,6 +3,11 @@
 
 #include <QDateTime>
 
+//输出的地址
+const char *outUrl =  "rtmp://192.168.5.138:1936/live/201955";
+AVFormatContext *outputContext = nullptr;
+AVFormatContext *inputContext = nullptr;
+
 AVPixelFormat AVDecoder::get_hw_format(AVCodecContext *ctx, const AVPixelFormat *pix_fmts)
 {
 
@@ -137,7 +142,6 @@ static int hw_decoder_init(AVCodecContext *ctx, AVBufferRef *hw_device_ctx, cons
 {
     int err = 0;
 
-
     if ((err = av_hwdevice_ctx_create(&hw_device_ctx, config->device_type,
                                       NULL, NULL, 0)) < 0) {
         fprintf(stderr, "Failed to create specified HW device.\n");
@@ -145,9 +149,6 @@ static int hw_decoder_init(AVCodecContext *ctx, AVBufferRef *hw_device_ctx, cons
     }
     ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
     ctx->pix_fmt = config->pix_fmt;
-
-    //    mVideoCodecCtx->hw_device_ctx = av_buffer_ref(mHWDeviceCtx); //创建对avbuffer的新引用
-    //    hangeRenderItemSize(mVideoCodecCtx->width,mVideoCodecCtx->height,(AVPixelFormat)mHWPixFormat); //更改呈现项大小
     return err;
 }
 
@@ -167,21 +168,16 @@ void AVDecoder::init(){
 //    }
 //    qDebug() << "-----------------------codecs.size" << codecs.size() << codecs;
 
-
-
     AVDictionary* options = NULL;
 //    av_dict_set(&options, "buffer_size", "10240", 0);  //增大“buffer_size”
 //    av_dict_set(&options, "max_delay", "500000", 0);
 //    av_dict_set(&options, "stimeout", "20000000", 0);  //设置超时断开连接时间
-
     av_dict_set(&options, "preset", "ultrafast ", 0); // av_opt_set(pCodecCtx->priv_data,"preset","fast",0);
     av_dict_set(&options, "tune", "zerolatency", 0);
-
 //    av_dict_set(&options, "rtsp_transport", "udp", 0);  //以udp方式打开，如果以tcp方式打开将udp替换为tcp
-
     //寻找视频
     mFormatCtx = avformat_alloc_context();
-    if(avformat_open_input(&mFormatCtx, mFilename.toStdString().c_str(), NULL, &options) != 0) //打开视频
+    if(avformat_open_input(&mFormatCtx, mFilename.toStdString().c_str(), NULL,&options) != 0) //打开视频
     {
         qDebug() << "media open error : " << mFilename.toStdString().data();
         statusChanged(AVDefine::AVMediaStatus_NoMedia);
@@ -382,6 +378,8 @@ void AVDecoder::init(){
                 }
             }
 
+            initEncodec();
+
             statusChanged(AVDefine::AVMediaStatus_Buffering);
             mIsInit = true;
 
@@ -389,6 +387,77 @@ void AVDecoder::init(){
             qDebug("init play_video is ok!!!!!!!");
         }
     }
+}
+
+void AVDecoder::initEncodec()
+{
+    string output = outUrl;
+    mIsInitEC = OpenOutput(output) == 0;
+}
+
+int AVDecoder::OpenOutput(string outUrl)
+{
+    inputContext = mFormatCtx;
+    int ret  = avformat_alloc_output_context2(&outputContext, nullptr, "flv"/*flv"*/, outUrl.c_str());
+    if(ret < 0)
+    {
+        av_log(NULL, AV_LOG_ERROR, "open output context failed\n");
+        goto Error;
+    }
+
+    ret = avio_open2(&outputContext->pb, outUrl.c_str(), AVIO_FLAG_READ_WRITE,nullptr, nullptr);
+    if(ret < 0)
+    {
+        av_log(NULL, AV_LOG_ERROR, "open avio failed");
+        goto Error;
+    }
+    for(int i = 0; i < inputContext->nb_streams; i++)
+    {
+        AVStream *in_stream  = inputContext->streams[i];
+        if(in_stream->codec->codec_type != AVMEDIA_TYPE_VIDEO) //只解视频数据
+            continue;
+
+        AVStream *out_stream = avformat_new_stream(outputContext, in_stream->codec->codec);
+        //法一
+        ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
+        //法二
+        //            ret = avcodec_parameters_copy(out_stream->codecpar, in_stream->codecpar);
+        //            out_stream->codecpar->codec_tag = 0;
+        if(ret < 0)
+        {
+            av_log(NULL, AV_LOG_ERROR, "copy coddec context failed");
+            goto Error;
+        }
+        out_stream->codec->codec_tag = 0;  //这个值一定要为0
+        if (outputContext->oformat->flags & AVFMT_GLOBALHEADER)
+                    out_stream->codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    }
+    //av_dump_format(outputContext, 0, outUrl.c_str(), 1);
+
+//    AVDictionary* options = NULL;
+//    av_dict_set(&options,"rtbufsize","5000",0);
+//    av_dict_set(&options,"start_time_realtime",0,0);
+//    av_opt_set(outputContext->priv_data, "preset", "superfast", 0);
+//    av_opt_set(outputContext->priv_data, "tune", "zerolatency", 0);
+    ret = avformat_write_header(outputContext, NULL); //写入参数
+    if(ret < 0)
+    {
+        av_log(NULL, AV_LOG_ERROR, "format write header failed");
+        goto Error;
+    }
+
+    av_log(NULL, AV_LOG_FATAL, " Open output file success %s\n",outUrl.c_str());
+    return ret ;
+Error:
+    if(outputContext)
+    {
+        for(int i = 0; i < outputContext->nb_streams; i++)
+        {
+            avcodec_close(outputContext->streams[i]->codec);
+        }
+        avformat_close_input(&outputContext);
+    }
+    return ret ;
 }
 
 void AVDecoder::getPacket()
@@ -422,7 +491,7 @@ void AVDecoder::getPacket()
         getPacketTask();
         return;
     }
-    pkt->pts = pkt->pts == AV_NOPTS_VALUE ? pkt->dts : pkt->pts;
+
     if (pkt->stream_index == mVideoIndex && mIsOpenVideoCodec){
         int currentTime = av_q2d(mFormatCtx->streams[mVideoIndex]->time_base ) * pkt->pts * 1000;
         //                  ret = avcodec_send_packet(mVideoCodecCtx, pkt);
@@ -438,7 +507,33 @@ void AVDecoder::getPacket()
         //                  av_freep(pkt);
         //                  pkt = NULL;
         //                  mIsVideoSeeked = false;
-        videoq->put(pkt);
+
+
+
+        if(mIsInitEC){
+            AVPacket *videopacket_t = av_packet_alloc();
+            av_copy_packet(videopacket_t, pkt);
+            if (av_dup_packet(videopacket_t) < 0)
+            {
+                av_free_packet(videopacket_t);
+            }
+            videopacket_t->pos = 0;
+            videopacket_t->flags = 1;
+            videopacket_t->convergence_duration = 0;
+            videopacket_t->side_data_elems = 0;
+            videopacket_t->stream_index = 0;
+            videopacket_t->duration = 0;
+
+            auto inputStream = inputContext->streams[videopacket_t->stream_index];
+            auto outputStream = outputContext->streams[0];  //只有视屏
+            av_packet_rescale_ts(videopacket_t,inputStream->time_base,outputStream->time_base);
+
+            int ret = av_interleaved_write_frame(outputContext, videopacket_t);  //推流
+            av_freep(videopacket_t);
+            //            qDebug() << "-----------------------------stream_index" << ret;
+        }
+        pkt->pts = pkt->pts == AV_NOPTS_VALUE ? pkt->dts : pkt->pts;
+        videoq->put(pkt);   //显示
 //       qDebug() << "------------------------------getPacket" << videoq->size()  << currentTime << QDateTime::currentMSecsSinceEpoch();
     }else {
         av_packet_unref(pkt);
@@ -465,7 +560,6 @@ void AVDecoder::decodec()
     av_freep(pkt);
     decodecTask();
 }
-
 
 int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
 {
