@@ -2,9 +2,10 @@
 #include <QDebug>
 
 #include <QDateTime>
+#include <QTimer>
 
 //输出的地址
-const char *outUrl =  "rtmp://192.168.5.138:1936/live/201955";
+const char *outUrl =  "rtmp://192.168.5.138:1936/live/test";
 AVFormatContext *outputContext = nullptr;
 AVFormatContext *inputContext = nullptr;
 
@@ -90,6 +91,11 @@ AVDecoder::AVDecoder(QObject *parent) : QObject(parent), videoq(new PacketQueue)
 
     av_log_set_callback(NULL);//不打印日志
     av_lockmgr_register(lockmgr);
+
+    _fpsTimer = new QTimer(this);
+    _fpsTimer->setInterval(999);
+    connect(_fpsTimer, &QTimer::timeout, this, &AVDecoder::onFpsTimeout);
+    _fpsTimer->start();
 
     videoq->release();
     initRenderList();
@@ -177,6 +183,10 @@ void AVDecoder::init(){
 //    av_dict_set(&options, "rtsp_transport", "udp", 0);  //以udp方式打开，如果以tcp方式打开将udp替换为tcp
     //寻找视频
     mFormatCtx = avformat_alloc_context();
+    lastReadPacktTime = av_gettime();
+    mFormatCtx->interrupt_callback.opaque = this;
+    mFormatCtx->interrupt_callback.callback = interrupt_cb;
+
     if(avformat_open_input(&mFormatCtx, mFilename.toStdString().c_str(), NULL,&options) != 0) //打开视频
     {
         qDebug() << "media open error : " << mFilename.toStdString().data();
@@ -469,6 +479,7 @@ void AVDecoder::getPacket()
     }
     AVPacket *pkt = av_packet_alloc();
     mVideoCodecCtxMutex.lockForRead();
+    lastReadPacktTime = av_gettime();
     int ret = av_read_frame(mFormatCtx, pkt);
     mVideoCodecCtxMutex.unlock();
     if ((ret == AVERROR_EOF || avio_feof(mFormatCtx->pb))) { //读取完成
@@ -493,22 +504,8 @@ void AVDecoder::getPacket()
     }
 
     if (pkt->stream_index == mVideoIndex && mIsOpenVideoCodec){
-        int currentTime = av_q2d(mFormatCtx->streams[mVideoIndex]->time_base ) * pkt->pts * 1000;
-        //                  ret = avcodec_send_packet(mVideoCodecCtx, pkt);
-        //                  if(ret != 0){
-        //                  }else{
-        //                      AVFrame *tempFrame = av_frame_alloc();
-        //                      while(avcodec_receive_frame(mVideoCodecCtx, tempFrame) == 0){
-        //                          av_frame_unref(tempFrame);
-        //                      }
-        //                      av_frame_free(&tempFrame);
-        //                  }
-        //                  av_packet_unref(pkt);
-        //                  av_freep(pkt);
-        //                  pkt = NULL;
-        //                  mIsVideoSeeked = false;
-
-
+        //计算真实的渲染FPS
+        _fpsFrameSum++;
 
         if(mIsInitEC){
             AVPacket *videopacket_t = av_packet_alloc();
@@ -532,6 +529,7 @@ void AVDecoder::getPacket()
             av_freep(videopacket_t);
             //            qDebug() << "-----------------------------stream_index" << ret;
         }
+
         pkt->pts = pkt->pts == AV_NOPTS_VALUE ? pkt->dts : pkt->pts;
         videoq->put(pkt);   //显示
 //       qDebug() << "------------------------------getPacket" << videoq->size()  << currentTime << QDateTime::currentMSecsSinceEpoch();
@@ -637,9 +635,25 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
 
         item->pts   = item->frame->pts;
         item->valid = true;
-        if(item->frame->pts != AV_NOPTS_VALUE)
-            item->pts = av_q2d(mFormatCtx->streams[mVideoIndex]->time_base ) * item->frame->pts * 1000;
+
+        if(item->frame->pts != AV_NOPTS_VALUE){
+                item->pts = av_q2d(mFormatCtx->streams[mVideoIndex]->time_base ) * item->frame->pts * 1000;
+        }
         item->mutex.unlock();
+
+//        if(_fps < 30 && getRenderListSize() < maxRenderListSize ){
+//            RenderItem* item2 = getInvalidRenderItem();
+//            if(item2){
+//                item2->mutex.lockForWrite();
+//                item->mutex.lockForRead();
+//                av_frame_copy(item2->frame, item->frame);
+//                item2->pts   = item->pts; // item2->frame->pts; 有问题
+////                qDebug() << "----------------------" << item->pts << item2->pts << item2->frame->pts;
+//                item2->valid = true;
+//                item->mutex.unlock();
+//                item2->mutex.unlock();
+//            }
+//        }
     }
 
 fail:
@@ -912,4 +926,21 @@ void AVDecoder::changeRenderItemSize(int width, int height, AVPixelFormat format
         item2->mutex.unlock();
     }
     mRenderListMutex.unlock();
+}
+
+void AVDecoder::onFpsTimeout()
+{
+    if(!mIsInit || !mIsOpenVideoCodec){ //必须初始化
+        return;
+    }
+    if(getRenderListSize() <= 0) {
+        return;
+    }
+
+    if(20 < _fpsFrameSum && _fpsFrameSum < 62){
+        _fps = (_fpsFrameSum + _fps) / 2;
+//        if(mCallback)
+//            mCallback->mediaUpdateFps(_fps);
+    }
+    _fpsFrameSum = 0;
 }

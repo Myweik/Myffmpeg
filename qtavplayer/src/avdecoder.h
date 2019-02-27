@@ -7,6 +7,8 @@
 #include <QImage>
 #include "AVDefine.h"
 #include "AVMediaCallback.h"
+#include <QDebug>
+
 extern "C"
 {
 
@@ -14,6 +16,8 @@ extern "C"
     #define INT64_C
     #define UINT64_C
     #endif
+
+    #include <libavutil/time.h>
 
     #include <libavcodec/avcodec.h>
     #include <libavcodec/avfft.h>
@@ -76,6 +80,22 @@ protected:
     void setFilenameImpl(const QString &source);
 
 private:
+    qint64 lastReadPacktTime = 0;
+    int timeout = 5000;
+    static int interrupt_cb(void *ctx)
+    {
+        AVDecoder* avDecoder = (AVDecoder* )ctx;
+        if(av_gettime() - avDecoder->lastReadPacktTime > avDecoder->timeout * 1000)
+        {
+            return -1;
+        }
+        return 0;
+    }
+
+    /* 推流 */
+    void initEncodec();
+    int  OpenOutput(string outUrl);
+
     void getPacketTask();
     void decodecTask();
 
@@ -83,11 +103,8 @@ private:
     void statusChanged(AVDefine::AVMediaStatus);
     int decode_write(AVCodecContext *avctx, AVPacket *packet);
     static enum AVPixelFormat get_hw_format(AVCodecContext *ctx, const enum AVPixelFormat *pix_fmts);
-private :
-    /* 推流 */
-    void initEncodec();
-    int  OpenOutput(string outUrl);
 
+private :
     void initRenderList();
     void clearRenderList(bool isDelete = false);
     RenderItem *getInvalidRenderItem();
@@ -96,6 +113,8 @@ private :
     /* 软解需要 */
     void changeRenderItemSize(int width,int height,AVPixelFormat format);
 
+    /* fps统计 */
+    void onFpsTimeout();
 private:
     bool mIsInitEC = false;
     bool mIsInit = false;
@@ -113,7 +132,7 @@ private:
     QReadWriteLock mRenderListMutex;    //队列操作锁
     int maxRenderListSize = 15;         //渲染队列最大数量
 
-    /* 各种资源锁 */
+    /* 资源锁 */
     QReadWriteLock mVideoCodecCtxMutex;
 
     //  ----- HW
@@ -125,6 +144,9 @@ private:
     enum AVPixelFormat mHWPixFormat;
 
 private:
+    QTimer      *_fpsTimer = nullptr; //帧率统计心跳
+    uint        _fpsFrameSum = 0;
+
     uchar       _fps = 0;
     VideoFormat vFormat;
     QSize mSize = QSize(0,0);

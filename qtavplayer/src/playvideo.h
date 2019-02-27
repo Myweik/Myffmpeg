@@ -41,7 +41,7 @@ private:
     uchar       _fps = 0;    //fps
     uchar       frameStep = 0;
 
-    uint        _cache = 80; //缓存200ms
+    uint        _cache = 100; //缓存100ms -- 帧数不够时强制缓存数帧
     uchar       _cacheFrame = 0; //根据fps算的缓存帧数
 
     QWaitCondition mCondition;

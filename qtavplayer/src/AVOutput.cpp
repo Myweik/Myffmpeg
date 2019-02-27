@@ -353,7 +353,7 @@ void AVRenderer::paint(){
         mTime.start();
 
     int elapsed = mTime.elapsed();
-    if(elapsed - mLastTime >= 1000){ //1秒钟
+    if(elapsed - mLastTime >= 999){ //1秒钟
         mLastTime = 0;
         mTime.restart();
         m_output->setReallyFps(mFps);
@@ -628,8 +628,12 @@ int AVOutput::reallyFps() const{
 }
 
 void  AVOutput::setReallyFps(int reallyFps){
-    this->mReallyFps = reallyFps;
+    this->mReallyFps = (reallyFps + this->mReallyFps ) / 2;
     emit reallyFpsChanged();
+
+    if(mPlayer){
+        mPlayer->mediaUpdateFps(reallyFps);
+    }
 }
 
 bool AVOutput::HDR(){
