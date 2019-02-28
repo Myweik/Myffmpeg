@@ -28,6 +28,7 @@ public :
     void mediaStatusChanged(AVDefine::AVMediaStatus);
     void mediaHasVideoChanged();
     void mediaUpdateFps(uchar fps);
+    uchar mediaGetFps();
 
 signals:
     void updateVideoFrame(VideoFormat*);
@@ -39,7 +40,7 @@ private:
 
 private:
     uchar       _fps = 0;    //fps
-    uchar       frameStep = 0;
+    uchar       _frameStep = 0;
 
     uint        _cache = 100; //缓存100ms -- 帧数不够时强制缓存数帧
     uchar       _cacheFrame = 0; //根据fps算的缓存帧数

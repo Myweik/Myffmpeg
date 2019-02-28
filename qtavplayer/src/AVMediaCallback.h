@@ -30,6 +30,8 @@ public :
     virtual void mediaUpdateBufferSize(int time){}
     /** 设置FPS */
     virtual void mediaUpdateFps(uchar fps){}
+    /** 获取FPS */
+    virtual uchar mediaGetFps(){ return 0; }
 };
 
 

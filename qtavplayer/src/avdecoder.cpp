@@ -75,6 +75,10 @@ void AVCodecTask::run(){
         break;
     case AVCodecTaskCommand_ShowFrameByPosition :   //按位置显示帧
         break;
+    case AVCodecTaskCommand_RePlay :   //重新加载
+        mCodec->_rePlay();
+        break;
+
     }
 }
 
@@ -132,6 +136,11 @@ void AVDecoder::load(){
 
 void AVDecoder::setFilename(const QString &source){
     mProcessThread.addTask(new AVCodecTask(this,AVCodecTask::AVCodecTaskCommand_SetFileName,0,source));
+}
+
+void AVDecoder::rePlay()
+{
+    mProcessThread.addTask(new AVCodecTask(this,AVCodecTask::AVCodecTaskCommand_RePlay));
 }
 
 void AVDecoder::getPacketTask()
@@ -488,12 +497,18 @@ void AVDecoder::getPacket()
         getPacketTask();
         return;
     }
+
+    static uchar errorSum = 0;
     if (mFormatCtx->pb && mFormatCtx->pb->error)
     {
         av_packet_unref(pkt);
         av_freep(pkt);
         getPacketTask();
+        if(errorSum++ > 10) //一直报错 重启
+            rePlay();
         return;
+    }else{
+        errorSum = 0;
     }
     if(ret < 0)
     {
@@ -503,6 +518,7 @@ void AVDecoder::getPacket()
         return;
     }
 
+//    qDebug() << "-----------------------pkt->stream_index" << pkt->stream_index <<   mVideoIndex;
     if (pkt->stream_index == mVideoIndex && mIsOpenVideoCodec){
         //计算真实的渲染FPS
         _fpsFrameSum++;
@@ -527,12 +543,12 @@ void AVDecoder::getPacket()
 
             int ret = av_interleaved_write_frame(outputContext, videopacket_t);  //推流
             av_freep(videopacket_t);
-            //            qDebug() << "-----------------------------stream_index" << ret;
+//            qDebug() << "-----------------------------stream_index" << ret;
         }
 
         pkt->pts = pkt->pts == AV_NOPTS_VALUE ? pkt->dts : pkt->pts;
         videoq->put(pkt);   //显示
-//       qDebug() << "------------------------------getPacket" << videoq->size()  << currentTime << QDateTime::currentMSecsSinceEpoch();
+//       qDebug() << "------------------------------getPacket" << videoq->size() << QDateTime::currentMSecsSinceEpoch();
     }else {
         av_packet_unref(pkt);
         av_freep(pkt);
@@ -552,7 +568,7 @@ void AVDecoder::decodec()
     AVPacket *pkt = videoq->get();
     if (pkt->stream_index == mVideoIndex) {
         int ret = decode_write(mVideoCodecCtx, pkt);
-//        qDebug() << "------------------------------decodec2" << ret<<videoq->size() << getRenderListSize();
+//        qDebug() << "------------------------------decodec2" << ret <<videoq->size() << getRenderListSize();
     }
     av_packet_unref(pkt);
     av_freep(pkt);
@@ -605,13 +621,12 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
                     item->mutex.unlock();
                     goto fail;
                 }else
-                    av_frame_copy_props(item->frame, frame);
+                    av_frame_copy_props(item->frame, frame); 
             }
         } else{ //软解 转格式  --- [软解还没调好]  >> BUG 函数结束时 item->frame被清空 导致无数据
             if(mSize != QSize(frame->width, frame->height) || mPixFormat != mVideoCodecCtx->pix_fmt){
-                /// 重要信息便跟 需要转码时重启
-//                if(mVideoSwsCtx)
-//                    reboot();
+                /// 重要信息变更 需要转码时重启
+                rePlay();
             }
 
             if(mVideoSwsCtx){
@@ -640,20 +655,6 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
                 item->pts = av_q2d(mFormatCtx->streams[mVideoIndex]->time_base ) * item->frame->pts * 1000;
         }
         item->mutex.unlock();
-
-//        if(_fps < 30 && getRenderListSize() < maxRenderListSize ){
-//            RenderItem* item2 = getInvalidRenderItem();
-//            if(item2){
-//                item2->mutex.lockForWrite();
-//                item->mutex.lockForRead();
-//                av_frame_copy(item2->frame, item->frame);
-//                item2->pts   = item->pts; // item2->frame->pts; 有问题
-////                qDebug() << "----------------------" << item->pts << item2->pts << item2->frame->pts;
-//                item2->valid = true;
-//                item->mutex.unlock();
-//                item2->mutex.unlock();
-//            }
-//        }
     }
 
 fail:
@@ -662,8 +663,6 @@ fail:
     mVideoCodecCtxMutex.unlock();
 
     return ret;
-//    if (ret < 0)
-//        return ret;
 }
 
 void AVDecoder::setFilenameImpl(const QString &source){
@@ -675,7 +674,18 @@ void AVDecoder::setFilenameImpl(const QString &source){
     mFilename = source;
     mIsOpenVideoCodec = false;
     mIsInit = false;
-    if(mFilename.size() != 0)
+    if(mFilename.size() > 0)
+        load();
+}
+
+void AVDecoder::_rePlay()
+{
+    if(mFilename.size() > 0){
+        release();//释放所有资源
+    }
+    mIsOpenVideoCodec = false;
+    mIsInit = false;
+    if(mFilename.size() > 0)
         load();
 }
 
@@ -939,8 +949,8 @@ void AVDecoder::onFpsTimeout()
 
     if(20 < _fpsFrameSum && _fpsFrameSum < 62){
         _fps = (_fpsFrameSum + _fps) / 2;
-//        if(mCallback)
-//            mCallback->mediaUpdateFps(_fps);
+        if(mCallback)
+            mCallback->mediaUpdateFps(_fps);
     }
     _fpsFrameSum = 0;
 }

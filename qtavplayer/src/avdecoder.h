@@ -69,15 +69,16 @@ public :
     qint64 requestRenderNextFrame();
     void load(); //初始化
     void setFilename(const QString &source);
+    void rePlay(); //重新加载
     qint64 getNextFrameTime();
     int  getRenderListSize();
 
 protected:
     void init();
-
     void getPacket();
     void decodec();
     void setFilenameImpl(const QString &source);
+    void _rePlay();
 
 private:
     qint64 lastReadPacktTime = 0;
@@ -169,6 +170,7 @@ public :
         AVCodecTaskCommand_DecodeToRender,
         AVCodecTaskCommand_SetDecodecMode,
         AVCodecTaskCommand_ShowFrameByPosition,
+        AVCodecTaskCommand_RePlay,   //重新加载
     };
     AVCodecTask(AVDecoder *codec,AVCodecTaskCommand command,double param = 0,QString param2 = ""):
         mCodec(codec),command(command),param(param),param2(param2){}

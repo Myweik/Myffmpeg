@@ -254,6 +254,10 @@ public:
         initializeOpenGLFunctions();
     }
     ~AVRenderer();
+
+signals:
+    void sendUpdate();
+
 public slots :
     void updateVideoFrame(VideoFormat*);
 
@@ -306,5 +310,8 @@ private:
 
     RenderParams params;
     GLfloat mLastOffset; //上一次的偏移量
+
+
+    uchar _M24d = 0;
 };
 #endif // AVOUTPUT_H

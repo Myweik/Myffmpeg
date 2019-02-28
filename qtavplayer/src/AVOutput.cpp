@@ -227,6 +227,9 @@ QOpenGLFramebufferObject *AVRenderer::createFramebufferObject(const QSize &size)
 void AVRenderer::updateVideoFrame(VideoFormat *format){
     if(format == NULL)
         return;
+
+    _M24d++;
+
     mDataMutex.lock();
     format->renderFrameMutex->lock();
     if(m_format.width != format->renderFrame->width || m_format.height != format->height || m_format.format != format->format){
@@ -241,6 +244,7 @@ void AVRenderer::updateVideoFrame(VideoFormat *format){
     m_format.renderFrameMutex = format->renderFrameMutex;
     mForceUpdate = true;
     mDataMutex.unlock();
+    emit sendUpdate();
 }
 
 void AVRenderer::init(){
@@ -360,11 +364,9 @@ void AVRenderer::paint(){
         mFps = 0;
     }
     //end 计算真实的渲染FPS
-
     if(!mForceUpdate){
         return;
     }
-
     ++mFps;
 
     mDataMutex.lock();
@@ -494,7 +496,8 @@ void AVRenderer::paint(){
     m_format.renderFrameMutex->unlock();
     mDataMutex.unlock();
 
-    int rotate = m_format.rotate;
+//    int rotate = m_format.rotate;
+    int rotate = 0;
     switch (m_output->orientation()) {
     case AVDefine::AVOrientation_LandscapeOrientation:rotate += 90;break;
     case AVDefine::AVOrientation_InvertedLandscapeOrientation:rotate += 270;break;
@@ -547,6 +550,11 @@ void AVRenderer::paint(){
     m_program->release();
     displayFbo->bindDefault();
 
+    static uchar _24d = 0;
+    if(_24d+1 != _M24d)
+        qDebug() << "--------------------------_M24d" << _M24d - _24d;
+    _24d = _M24d;
+
     m_output->window()->resetOpenGLState(); //重置opengl状态，不然界面上的文字会出现花屏
 
 //    QOpenGLFramebufferObject *displayFbo = framebufferObject();
@@ -560,7 +568,7 @@ AVOutput::AVOutput(QQuickItem *parent)
     , mPlayer(NULL)
     , mFillMode(AVDefine::AVFillMode_Default)
     , mOrientation(AVDefine::AVOrientation_Default)
-    , mFps(30)
+    , mFps(80)
     , mIsDestroy(false)
     , mBackgroundColor(QColor(0,0,0,255))
     , mReallyFps(0)
@@ -569,9 +577,10 @@ AVOutput::AVOutput(QQuickItem *parent)
     , mUseVideoBackground(false)
 {
 //    setFlag(ItemHasContents);
-    connect(&mTimer,SIGNAL(timeout()),this,SLOT(update()));
-    mTimer.setInterval(1000 / mFps);
-    mTimer.start();
+
+//    connect(&mTimer,SIGNAL(timeout()),this,SLOT(update()));
+//    mTimer.setInterval(1000 / mFps);
+//    mTimer.start();
 }
 AVOutput::~AVOutput(){
     mIsDestroy = true;
@@ -631,9 +640,9 @@ void  AVOutput::setReallyFps(int reallyFps){
     this->mReallyFps = (reallyFps + this->mReallyFps ) / 2;
     emit reallyFpsChanged();
 
-    if(mPlayer){
-        mPlayer->mediaUpdateFps(reallyFps);
-    }
+//    if(mPlayer){
+//        mPlayer->mediaUpdateFps(reallyFps);
+//    }
 }
 
 bool AVOutput::HDR(){
@@ -705,7 +714,10 @@ QQuickFramebufferObject::Renderer *AVOutput::createRenderer() const{
     AVRenderer *renderer = new AVRenderer((AVOutput *)this);
     window()->setClearBeforeRendering(true);
     window()->setColor(QColor(0,0,0,0));
-    renderer->updateVideoFrame(mPlayer->getRenderData());
+
+    connect(renderer,SIGNAL(sendUpdate()),
+            this,SLOT(update()),Qt::QueuedConnection);
+
     connect(this,SIGNAL(updateVideoFrame(VideoFormat*)),
             renderer,SLOT(updateVideoFrame(VideoFormat*)),Qt::DirectConnection);
     return renderer;
