@@ -193,6 +193,7 @@ public:
     QRect calculateGeometry(int w,int h);
 public slots:
     void playStatusChanged();
+    void frameReady();
 protected:
     virtual Renderer *createRenderer() const;
 

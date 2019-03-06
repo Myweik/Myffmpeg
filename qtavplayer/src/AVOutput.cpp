@@ -716,11 +716,18 @@ QQuickFramebufferObject::Renderer *AVOutput::createRenderer() const{
     window()->setColor(QColor(0,0,0,0));
 
     connect(renderer,SIGNAL(sendUpdate()),
-            this,SLOT(update()),Qt::QueuedConnection);
+            this,SLOT(frameReady()),Qt::DirectConnection);
 
     connect(this,SIGNAL(updateVideoFrame(VideoFormat*)),
             renderer,SLOT(updateVideoFrame(VideoFormat*)),Qt::DirectConnection);
     return renderer;
+}
+
+void AVOutput::frameReady()
+{
+    // To avoid thread polution do not call frameReady directly, but via the
+    // event loop.
+    QMetaObject::invokeMethod(this, "update", Qt::QueuedConnection);
 }
 
 void AVOutput::playStatusChanged(){
@@ -733,3 +740,4 @@ void AVOutput::playStatusChanged(){
         }
     }
 }
+
