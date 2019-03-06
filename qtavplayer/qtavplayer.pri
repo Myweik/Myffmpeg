@@ -1,15 +1,21 @@
+QT += multimedia
+
 SOURCES += \
     $$PWD/src/avdecoder.cpp \
     $$PWD/src/AVThread.cpp \
     $$PWD/src/playvideo.cpp \
-    $$PWD/src/AVOutput.cpp
+    $$PWD/src/AVOutput.cpp \
+    $$PWD/src/RtspPlayer.cpp \
+    $$PWD/src/VideoBuffer.cpp
 HEADERS += \
     $$PWD/src/avdecoder.h \
     $$PWD/src/AVThread.h \
     $$PWD/src/playvideo.h \
     $$PWD/src/AVDefine.h \
     $$PWD/src/AVOutput.h  \
-    $$PWD/src/AVMediaCallback.h
+    $$PWD/src/AVMediaCallback.h \
+    $$PWD/src/RtspPlayer.h \
+    $$PWD/src/VideoBuffer.h
 
 RESOURCES += \
     $$PWD/ffmpegqml.qrc \

@@ -1,5 +1,6 @@
 #include "avdecoder.h"
 #include <QDebug>
+#include "VideoBuffer.h"
 
 #include <QDateTime>
 #include <QTimer>
@@ -776,6 +777,32 @@ qint64 AVDecoder::requestRenderNextFrame(){
             render->mutex.unlock();
             if(mCallback)
                 mCallback->mediaUpdateVideoFrame((void *)&vFormat);
+
+//            uint8_t*            m_videoData[4] = {nullptr};
+//            int                 m_videoLineSize[4];
+//            int                 m_videoSize;
+
+
+//            m_videoSize = av_image_alloc(m_videoData, m_videoLineSize,
+//                                        width(), height(), m_videoCtx->pix_fmt, 1);
+//            if (m_videoSize < 0) {
+//                qWarning("Could not allocate raw video buffer.");
+//                free();
+//                return false;
+//            }
+
+
+
+
+            /* copy decoded frame to destination buffer:
+             * this is required since rawvideo expects non aligned data */
+//            av_image_copy(m_videoData, m_videoLineSize,
+//                          const_cast<const uint8_t **>(m_frame->data), m_frame->linesize,
+//                          m_videoCtx->pix_fmt, width(), height());
+
+//            VideoBuffer *buffer = new VideoBuffer(m_videoData[0], m_videoSize, m_videoLineSize[0]);
+
+//            emit newVideoFrame(QVideoFrame(buffer, frameSize(), QVideoFrame::Format_YUV420P));
         }
     }
     return time;
