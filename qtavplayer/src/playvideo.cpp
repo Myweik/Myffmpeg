@@ -58,12 +58,6 @@ void PlayVideo::requestRender()
         static int space2 = 0;
         space2  = nextTime > currentTime ? nextTime - currentTime : space2;
 
-        if(space2 < 0 || space2 > 45)
-            qDebug() << "---------===========<<<<<<<<<2" << space2 << len;
-        if(space > 45)
-            qDebug() << "---------===========<<<<<<<<<2" << space;
-
-
         if(len >= _cacheFrame){
             space = _frameStep / 10 + 1;
         }else if(len >= _cacheFrame - 2){
@@ -71,19 +65,6 @@ void PlayVideo::requestRender()
         }else{
             space = space2 - space + _frameStep / 10 +1;
         }
-
-
-//        if(len >= 10){
-//            space = space2 - space - _frameStep / 3 -1;;
-//        }else if(len >= 10){
-//            space = space2  - _frameStep / 7 - 1;
-//        }else if(len >= 6){
-//            space = space2 - space - _frameStep / 10 -1;;
-//        }else if(len >= 4){
-//            space = space2 - space;
-//        }else{
-//            space = space2 - space + _frameStep / 10 +1;
-//        }
 
         if(space <= 0){
             space = 1;
@@ -96,7 +77,7 @@ void PlayVideo::requestRender()
         }
 
 //        if(len > _cacheFrame)
-            qDebug() << "-------------------------------requestRender" << _cacheFrame << _frameStep << lent << len  <<  currentTime /*<< nextTime << nextTime - currentTime*/ << space;
+//            qDebug() << "-------------------------------requestRender" << _cacheFrame << _frameStep << lent << len  <<  currentTime /*<< nextTime << nextTime - currentTime*/ << space;
 
         mMutex.lock();
         mCondition.wait(&mMutex, space);

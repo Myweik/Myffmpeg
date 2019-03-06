@@ -560,6 +560,10 @@ void AVDecoder::decodec()
 {
 //    return;
 //    qDebug() << "------------------------------decodec1" << videoq->size() << getRenderListSize();
+
+    if(videoq->size() > 20) //清空
+        videoq->release();
+
     if(videoq->size() <= 0 || getRenderListSize() >= maxRenderListSize) {
         decodecTask();
         return;
@@ -712,15 +716,16 @@ void AVDecoder::release(bool isDeleted){
         mVideoCodecCtx = NULL;
     }
     mVideoCodecCtxMutex.unlock();
-
     if(mVideoCodec != NULL){
         av_free(mVideoCodec);
         mVideoCodec = NULL;
     }
 
     if(mFormatCtx != NULL){
-        av_read_pause(mFormatCtx);
-        avformat_close_input(&mFormatCtx);
+        if( mIsOpenVideoCodec){
+            av_read_pause(mFormatCtx);
+            avformat_close_input(&mFormatCtx);
+        }
         avformat_free_context(mFormatCtx);
         mFormatCtx = NULL;
     }
@@ -729,6 +734,13 @@ void AVDecoder::release(bool isDeleted){
         sws_freeContext(mVideoSwsCtx);
         mVideoSwsCtx = NULL;
     }
+
+    if(outputContext != NULL){
+        avformat_free_context(outputContext);
+        outputContext = NULL;
+    }
+
+
     if(videoq)
         videoq->release();
     clearRenderList(isDeleted);
