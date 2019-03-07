@@ -17,15 +17,18 @@ void AVPlayerTask::run(){
     }
 }
 
-PlayVideo::PlayVideo(QObject *parent) : QObject(parent), mDecoder(new AVDecoder)
+PlayVideo::PlayVideo(QObject *parent) : QObject(parent), mDecoder(new AVDecoder), _rtspPlayer(new RtspPlayer)
 {
     mDecoder->setMediaCallback(this);
     wakeupPlayer();
+
+    _rtspPlayer->setDecoder(mDecoder);
 }
 
 PlayVideo::~PlayVideo()
 {
     delete mDecoder;
+    delete _rtspPlayer;
 }
 
 void PlayVideo::setUrl(QString url)
@@ -49,10 +52,9 @@ void PlayVideo::requestRender()
     /* 1-60  >2 45  >3 30  >4 20  >5 15 */
     int lent = mDecoder->getRenderListSize();
     if(lent >= 2){
-        static  qint64 lastTime = QDateTime::currentMSecsSinceEpoch();
-        int space = QDateTime::currentMSecsSinceEpoch() - lastTime;
+        qint64 lastTime = QDateTime::currentMSecsSinceEpoch();
         qint64 currentTime  = mDecoder->requestRenderNextFrame();
-
+        int space = QDateTime::currentMSecsSinceEpoch() - lastTime;
         qint64 nextTime     = mDecoder->getNextFrameTime();
         int len = mDecoder->getRenderListSize(); //有一帧是处于显示的  不可用
         static int space2 = 0;
@@ -75,14 +77,12 @@ void PlayVideo::requestRender()
         if(_fps < 29 && space + 3 <= 45 && len <= 2){
             space += _frameStep / 10;
         }
-
 //        if(len > _cacheFrame)
 //            qDebug() << "-------------------------------requestRender" << _cacheFrame << _frameStep << lent << len  <<  currentTime /*<< nextTime << nextTime - currentTime*/ << space;
-
         mMutex.lock();
         mCondition.wait(&mMutex, space);
         mMutex.unlock();
-        lastTime = QDateTime::currentMSecsSinceEpoch();
+
     }
     wakeupPlayer();
 }

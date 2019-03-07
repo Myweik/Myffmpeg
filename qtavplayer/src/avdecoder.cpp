@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QTimer>
 
+
 //输出的地址
 const char *outUrl =  "rtmp://192.168.5.138:1936/live/test";
 AVFormatContext *outputContext = nullptr;
@@ -321,7 +322,7 @@ void AVDecoder::init(){
                 statusChanged(AVDefine::AVMediaStatus_InvalidMedia);
             }
 
-            if(!mUseHw) //软解 -- 初始化转换器
+            if(!mUseHw) //初始化转换器
             {
                 if(mPixFormat != mVideoCodecCtx->pix_fmt)
                     mPixFormat = mVideoCodecCtx->pix_fmt;
@@ -768,41 +769,28 @@ qint64 AVDecoder::requestRenderNextFrame(){
         if(render != nullptr){
             render->mutex.lockForRead();
             render->isShowing = true;
-            vFormat.width  =  render->frame->width;
-            vFormat.height =  render->frame->height;
-            vFormat.format =  render->frame->format;
-            vFormat.renderFrame = render->frame;
-            vFormat.renderFrameMutex = &render->mutexLock;
             time = render->pts;
-            render->mutex.unlock();
-            if(mCallback)
-                mCallback->mediaUpdateVideoFrame((void *)&vFormat);
 
-//            uint8_t*            m_videoData[4] = {nullptr};
-//            int                 m_videoLineSize[4];
-//            int                 m_videoSize;
+            static QSize cSize = QSize(0,0);
+            if(cSize != QSize(render->frame->width, render->frame->height) || m_videoSize <= 0){
+                cSize = QSize(render->frame->width, render->frame->height);
+                emit frameSizeChanged(render->frame->width, render->frame->height);
+                if(m_videoSize <= 0)
+                    m_videoSize = av_image_alloc(m_videoData, m_videoLineSize,
+                                                 render->frame->width, render->frame->height,   (AVPixelFormat)render->frame->format, 1);
 
-
-//            m_videoSize = av_image_alloc(m_videoData, m_videoLineSize,
-//                                        width(), height(), m_videoCtx->pix_fmt, 1);
-//            if (m_videoSize < 0) {
-//                qWarning("Could not allocate raw video buffer.");
-//                free();
-//                return false;
-//            }
-
-
-
-
+            }
+            if(m_videoData <= 0)
+                return 0;
             /* copy decoded frame to destination buffer:
              * this is required since rawvideo expects non aligned data */
-//            av_image_copy(m_videoData, m_videoLineSize,
-//                          const_cast<const uint8_t **>(m_frame->data), m_frame->linesize,
-//                          m_videoCtx->pix_fmt, width(), height());
-
-//            VideoBuffer *buffer = new VideoBuffer(m_videoData[0], m_videoSize, m_videoLineSize[0]);
-
-//            emit newVideoFrame(QVideoFrame(buffer, frameSize(), QVideoFrame::Format_YUV420P));
+            av_image_copy(m_videoData, m_videoLineSize,
+                          const_cast<const uint8_t **>(render->frame->data), render->frame->linesize,
+                          (AVPixelFormat)render->frame->format, render->frame->width, render->frame->height);
+            render->mutex.unlock();
+            VideoBuffer *buffer = new VideoBuffer(m_videoData[0], m_videoSize, m_videoLineSize[0]);
+//            qDebug() << "------------------------------m_videoSize" << m_videoSize << render->frame->format; //AV_PIX_FMT_NV12
+            emit newVideoFrame(QVideoFrame(buffer, QSize(render->frame->width, render->frame->height), QVideoFrame::Format_NV12));
         }
     }
     return time;

@@ -1,6 +1,7 @@
 import QtQuick 2.5
 import QtQuick.Window 2.2
 import qtavplayer 1.0
+import QtMultimedia 5.5
 
 Rectangle {
     anchors.fill: parent
@@ -17,11 +18,17 @@ Rectangle {
         }
     }
 
+    VideoOutput {
+             source: avplayer.rtspPlayer
+             anchors.fill: parent
+//             focus : visible // to receive focus and capture key events when visible
+         }
 
-    AVOutput{ //可以同时在多个窗口上播放一个视频
-        anchors.fill: parent
-        source: avplayer
-    }
+//    AVOutput{ //可以同时在多个窗口上播放一个视频
+//        anchors.fill: parent
+//        source: avplayer
+//    }
+
     AVPlayer{
         id : avplayer
     }

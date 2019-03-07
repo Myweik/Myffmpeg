@@ -33,7 +33,7 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
 
 
-include ($$PWD/Media/Media.pri)
+#include ($$PWD/Media/Media.pri)
 include ($$PWD/qtavplayer/qtavplayer.pri)
 
 HEADERS += \

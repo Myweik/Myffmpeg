@@ -6,6 +6,7 @@
 #include "avdecoder.h"
 #include <QQmlApplicationEngine>
 #include "AVMediaCallback.h"
+#include "RtspPlayer.h"
 
 class AVPlayerTask;
 
@@ -17,8 +18,11 @@ public:
     explicit PlayVideo(QObject *parent = nullptr);
     ~PlayVideo();
 
+    Q_PROPERTY(RtspPlayer *rtspPlayer READ rtspPlayer)
+
     Q_INVOKABLE void setUrl(QString url);
 
+    RtspPlayer * rtspPlayer(){ return _rtspPlayer; }
     VideoFormat *getRenderData();
     AVDefine::AVPlayState getPlaybackState();
 protected :
@@ -50,6 +54,7 @@ private:
 
     AVDecoder *mDecoder;
     AVThread mThread;
+    RtspPlayer *_rtspPlayer;
 
     /** 播放状态 */
     AVDefine::AVPlayState mPlaybackState = AVDefine::AVPlayState_Playing;

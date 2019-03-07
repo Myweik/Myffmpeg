@@ -32,7 +32,7 @@ void RtspPlayer::setVideoSurface(QAbstractVideoSurface *surface)
         m_surface->start(m_format);
 }
 
-void RtspPlayer::setDecoder(RtspDecoder *decoder)
+void RtspPlayer::setDecoder(AVDecoder *decoder)
 {
     if (m_decoder == decoder)
         return;
@@ -55,10 +55,6 @@ void RtspPlayer::setDecoder(RtspDecoder *decoder)
 
         connect(m_decoder, SIGNAL(newVideoFrame(QVideoFrame)),
                 this, SLOT(onNewVideoFrameReceived(QVideoFrame)));
-
-        onFrameSizeChanged(m_decoder->width(), m_decoder->height());
-
-        m_decoder->play();
     }
 
     emit decoderChanged(m_decoder);

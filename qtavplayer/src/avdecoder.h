@@ -9,6 +9,8 @@
 #include "AVMediaCallback.h"
 #include <QDebug>
 
+#include <QVideoFrame>
+
 extern "C"
 {
 
@@ -80,6 +82,10 @@ protected:
     void setFilenameImpl(const QString &source);
     void _rePlay();
 
+signals:
+    void frameSizeChanged(int width, int height);
+    void newVideoFrame(const QVideoFrame &frame);
+
 private:
     qint64 lastReadPacktTime = 0;
     int timeout = 5000;
@@ -144,6 +150,10 @@ private:
     /** 硬解格式 */
     enum AVPixelFormat mHWPixFormat;
 
+    /** 显示 */
+    uint8_t*            m_videoData[4];// = {nullptr};
+    int                 m_videoLineSize[4];
+    int                 m_videoSize = 0;
 private:
     QTimer      *_fpsTimer = nullptr; //帧率统计心跳
     uint        _fpsFrameSum = 0;

@@ -5,13 +5,13 @@
 #include <QAbstractVideoSurface>
 #include <QVideoSurfaceFormat>
 #include <QList>
-#include "RtspDecoder.h"
+#include "avdecoder.h"
 
 class RtspPlayer : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QAbstractVideoSurface *videoSurface READ videoSurface WRITE setVideoSurface)
-    Q_PROPERTY(RtspDecoder *decoder READ decoder WRITE setDecoder NOTIFY decoderChanged)
+    Q_PROPERTY(AVDecoder *decoder READ decoder WRITE setDecoder NOTIFY decoderChanged)
     Q_PROPERTY(int width READ width NOTIFY widthChanged)
     Q_PROPERTY(int height READ height NOTIFY heightChanged)
 
@@ -22,14 +22,14 @@ public:
     inline QAbstractVideoSurface *videoSurface() { return m_surface; }
     void setVideoSurface(QAbstractVideoSurface *surface);
 
-    inline RtspDecoder *decoder() const { return m_decoder; }
-    void setDecoder(RtspDecoder *decoder);
+    inline AVDecoder *decoder() const { return m_decoder; }
+    void setDecoder(AVDecoder *decoder);
 
     inline int width() const;
     inline int height() const;
 
 signals:
-    void decoderChanged(RtspDecoder *decoder);
+    void decoderChanged(AVDecoder *decoder);
 
     void widthChanged(int width);
     void heightChanged(int height);
@@ -46,7 +46,7 @@ protected:
 private:
     QVideoSurfaceFormat m_format;
     QAbstractVideoSurface *m_surface;
-    RtspDecoder *m_decoder;
+    AVDecoder *m_decoder;
 };
 
 int RtspPlayer::width() const
