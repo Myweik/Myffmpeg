@@ -26,6 +26,17 @@ Window {
                   text: "Cancel"
                   onClicked: play.visible = false
               }
+
+              Button {
+                  text: "save"
+                  onClicked: play.item.record = true
+              }
+              Button {
+                  text: "Cancel Save"
+                  onClicked: play.item.record = false
+              }
+
+
           }
 
 }

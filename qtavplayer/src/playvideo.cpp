@@ -37,6 +37,12 @@ void PlayVideo::setUrl(QString url)
         mDecoder->setFilename(url);
 }
 
+void PlayVideo::saveTs(bool ok)
+{
+    if(mDecoder)
+        mDecoder->saveTs(ok);
+}
+
 VideoFormat *PlayVideo::getRenderData()
 {
      return mRenderData;

@@ -72,6 +72,7 @@ public :
     void load(); //初始化
     void setFilename(const QString &source);
     void rePlay(); //重新加载
+    void saveTs(bool status = false);
     qint64 getNextFrameTime();
     int  getRenderListSize();
 
@@ -150,10 +151,10 @@ private:
     /** 硬解格式 */
     enum AVPixelFormat mHWPixFormat;
 
-    /** 显示 */
-    uint8_t*            m_videoData[4];// = {nullptr};
-    int                 m_videoLineSize[4];
-    int                 m_videoSize = 0;
+    /** 保存TS流 */
+    FILE *tsSave = nullptr;
+    bool _isSaveTs = false;
+
 private:
     QTimer      *_fpsTimer = nullptr; //帧率统计心跳
     uint        _fpsFrameSum = 0;
@@ -181,6 +182,8 @@ public :
         AVCodecTaskCommand_SetDecodecMode,
         AVCodecTaskCommand_ShowFrameByPosition,
         AVCodecTaskCommand_RePlay,   //重新加载
+        AVCodecTaskCommand_saveTS,   //保存TS流
+        AVCodecTaskCommand_saveImage,//保存图片
     };
     AVCodecTask(AVDecoder *codec,AVCodecTaskCommand command,double param = 0,QString param2 = ""):
         mCodec(codec),command(command),param(param),param2(param2){}

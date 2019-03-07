@@ -21,6 +21,7 @@ public:
     Q_PROPERTY(RtspPlayer *rtspPlayer READ rtspPlayer)
 
     Q_INVOKABLE void setUrl(QString url);
+    Q_INVOKABLE void saveTs(bool ok = false);
 
     RtspPlayer * rtspPlayer(){ return _rtspPlayer; }
     VideoFormat *getRenderData();

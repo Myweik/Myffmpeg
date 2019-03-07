@@ -4,6 +4,8 @@
 
 #include <QDateTime>
 #include <QTimer>
+#include <QStandardPaths>
+#include <QDir>
 
 
 //输出的地址
@@ -143,6 +145,40 @@ void AVDecoder::setFilename(const QString &source){
 void AVDecoder::rePlay()
 {
     mProcessThread.addTask(new AVCodecTask(this,AVCodecTask::AVCodecTaskCommand_RePlay));
+}
+
+void AVDecoder::saveTs(bool status)
+{
+//    static bool cstatus = !status;
+//    if(cstatus == status){
+//        return;
+//    }else{
+//        cstatus = status;
+//    }
+qDebug() << "---------------------dir" << status << tsSave;
+    if(status){
+        if(tsSave == nullptr){
+            QString dir = QString("%1").arg(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)) + "/MMC Station/Video/" + QDateTime::currentDateTime().toString("yyyyMMdd") + "/";
+            QDir tmpDir1;
+            qDebug() << "---------------------dir" << dir;
+            bool ok = false;
+            if(tmpDir1.exists(dir)){
+                ok = true;
+            }else{
+                ok = tmpDir1.mkpath(dir);
+            }
+            if(ok){
+                QString fileName = QDateTime::currentDateTime().toString("hhmmsszzz");
+                fopen_s(&tsSave, QString("%1%2%3").arg(dir).arg(fileName).arg(".ts").toStdString().data(), "wb");
+            }
+        }
+//        mProcessThread.addTask(new AVCodecTask(this,AVCodecTask::AVCodecTaskCommand_SetFileName,0,source));
+    }else{
+        if(tsSave){
+            fclose(tsSave);
+            tsSave = nullptr;
+        }
+    }
 }
 
 void AVDecoder::getPacketTask()
@@ -322,6 +358,8 @@ void AVDecoder::init(){
             } else{
                 statusChanged(AVDefine::AVMediaStatus_InvalidMedia);
             }
+
+
 
             if(mPixFormat != mVideoCodecCtx->pix_fmt)
                 mPixFormat = mVideoCodecCtx->pix_fmt;
@@ -547,6 +585,10 @@ void AVDecoder::getPacket()
             av_freep(videopacket_t);
 //            qDebug() << "-----------------------------stream_index" << ret;
         }
+
+
+        if(tsSave)
+            fwrite(pkt->data, 1, pkt->size, tsSave);//写数据到文件中
 
         pkt->pts = pkt->pts == AV_NOPTS_VALUE ? pkt->dts : pkt->pts;
         videoq->put(pkt);   //显示
