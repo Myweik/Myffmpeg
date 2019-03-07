@@ -202,25 +202,33 @@ public :
         , valid (false)
         , isShowing(false)
     {
-        frame = av_frame_alloc();
+
     }
     void clear(){
-        if(frame != nullptr){
-            av_frame_unref(frame);
-        }
         pts = AV_NOPTS_VALUE;
         valid = false;
         isShowing  = false;
+        width = 0;
+        height = 0;
+        format = 0;
     }
 
     ~RenderItem(){
-        if(frame != nullptr){
+        if(videoSize){
             release();
         }
     }
 
-    AVFrame*    frame;      //帧
-    qint64      pts;        //播放时间
+     /* 帧 */
+    uint8_t*            videoData[4];
+    int                 videoLineSize[4];
+    int                 videoSize = 0;
+
+    int                 format = 0;
+    int                 width = 0;
+    int                 height = 0;
+    qint64              pts;        //播放时间
+
     bool        valid;      //有效的
     bool        isShowing;  //显示中
     QReadWriteLock mutex;   //读写锁
@@ -228,14 +236,10 @@ public :
 
 private:
     void release(){
-        if(frame != NULL){
-            av_frame_unref(frame);
-            av_frame_free(&frame);
-            frame = nullptr;
+        if(videoSize){
+            av_freep(&videoData[0]);
         }
-        pts = AV_NOPTS_VALUE;
-        valid = false;
-        isShowing  = false;
+        clear();
     }
 };
 

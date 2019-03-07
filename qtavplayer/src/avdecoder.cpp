@@ -315,6 +315,7 @@ void AVDecoder::init(){
                 }
                 videoq->setTimeBase(mFormatCtx->streams[mVideoIndex]->time_base);
                 videoq->init();
+
                 //-- 启动抓包线程 和 解码线程
                 getPacketTask();
                 decodecTask();
@@ -322,13 +323,12 @@ void AVDecoder::init(){
                 statusChanged(AVDefine::AVMediaStatus_InvalidMedia);
             }
 
+            if(mPixFormat != mVideoCodecCtx->pix_fmt)
+                mPixFormat = mVideoCodecCtx->pix_fmt;
+            if(mSize != QSize(mVideoCodecCtx->width, mVideoCodecCtx->height) )
+                mSize = QSize(mVideoCodecCtx->width, mVideoCodecCtx->height);
             if(!mUseHw) //初始化转换器
             {
-                if(mPixFormat != mVideoCodecCtx->pix_fmt)
-                    mPixFormat = mVideoCodecCtx->pix_fmt;
-                if(mSize != QSize(mVideoCodecCtx->width, mVideoCodecCtx->height) )
-                    mSize = QSize(mVideoCodecCtx->width, mVideoCodecCtx->height);
-
                 mVideoCodecCtx->pix_fmt =AV_PIX_FMT_D3D11VA_VLD;
                 switch (mVideoCodecCtx->pix_fmt) {
                 case AV_PIX_FMT_YUV420P :
@@ -583,7 +583,8 @@ void AVDecoder::decodec()
 
 int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
 {
-    AVFrame *frame = NULL, *sw_frame = NULL;;
+    AVFrame *frame = NULL, *sw_frame = NULL;
+
     int ret = 0;
     mVideoCodecCtxMutex.lockForRead();
 
@@ -602,6 +603,8 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
         return ret;
     }
 
+
+    AVFrame *tmp_frame = av_frame_alloc();
     sw_frame = av_frame_alloc();
     frame = sw_frame;
 
@@ -618,19 +621,24 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
             goto fail;
         }
 
-        item->mutex.lockForWrite();
+        if(mSize != QSize(frame->width, frame->height)){
+            /// 重要信息变更 需要转码时重启
+            rePlay();
+        }
+
+        item->mutex.lockForRead();
         if (mUseHw) { // 硬解拷贝
             /* retrieve data from GPU to CPU */
             if(frame->format == mHWPixFormat ){
-                if ((ret = av_hwframe_transfer_data(item->frame, frame, 0)) < 0) {
+                if ((ret = av_hwframe_transfer_data(tmp_frame, frame, 0)) < 0) {
                     qWarning() << "Error transferring the data to system memory";
                     item->mutex.unlock();
                     goto fail;
                 }else
-                    av_frame_copy_props(item->frame, frame); 
+                    av_frame_copy_props(tmp_frame, frame);
             }
         } else{ //软解 转格式  --- [软解还没调好]  >> BUG 函数结束时 item->frame被清空 导致无数据
-            if(mSize != QSize(frame->width, frame->height) || mPixFormat != mVideoCodecCtx->pix_fmt){
+            if(mPixFormat != mVideoCodecCtx->pix_fmt){
                 /// 重要信息变更 需要转码时重启
                 rePlay();
             }
@@ -641,29 +649,53 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
                                 frame->linesize,
                                 0,
                                 frame->height,
-                                item->frame->data,
-                                item->frame->linesize);
+                                tmp_frame->data,
+                                tmp_frame->linesize);
 
                 if(ret < 0){
                     qWarning() << "Error sws_scale";
+
                     item->mutex.unlock();
                     goto fail;
                 }
             }else{  //内存移动 -- 不然会被释放
-                av_frame_move_ref(item->frame, frame);
+                av_frame_move_ref(tmp_frame, frame);
             }
         }
 
-        item->pts   = item->frame->pts;
-        item->valid = true;
+        if(item->videoSize <= 0){ //初始化
+            item->mutex.unlock();
+            /* 初始化渲染队列 */
+            changeRenderItemSize(tmp_frame->width, tmp_frame->height, (AVPixelFormat)tmp_frame->format);
+            item->mutex.lockForWrite();
+        }
 
-        if(item->frame->pts != AV_NOPTS_VALUE){
-                item->pts = av_q2d(mFormatCtx->streams[mVideoIndex]->time_base ) * item->frame->pts * 1000;
+        if(item->videoSize){
+            /* copy decoded frame to destination buffer:
+             * this is required since rawvideo expects non aligned data */
+            av_image_copy(item->videoData, item->videoLineSize,
+                          const_cast<const uint8_t **>(tmp_frame->data), tmp_frame->linesize,
+                          (AVPixelFormat)tmp_frame->format, tmp_frame->width, tmp_frame->height);
+        }else{ // 重启
+            rePlay();
+            item->mutex.unlock();
+            goto fail;
+        }
+
+        item->width = tmp_frame->width;
+        item->height = tmp_frame->height;
+        item->format = tmp_frame->format;
+        item->pts   = tmp_frame->pts;
+        item->valid = true;
+        if(item->pts != AV_NOPTS_VALUE){
+                item->pts = av_q2d(mFormatCtx->streams[mVideoIndex]->time_base ) * item->pts * 1000;
         }
         item->mutex.unlock();
     }
 
 fail:
+    av_frame_unref(tmp_frame);
+    av_frame_free(&tmp_frame);
     av_frame_unref(sw_frame);
     av_frame_free(&sw_frame);
     mVideoCodecCtxMutex.unlock();
@@ -742,7 +774,6 @@ void AVDecoder::release(bool isDeleted){
         outputContext = NULL;
     }
 
-
     if(videoq)
         videoq->release();
     clearRenderList(isDeleted);
@@ -767,30 +798,30 @@ qint64 AVDecoder::requestRenderNextFrame(){
         /* 显示本次数据 */
         render = getMinRenderItem();
         if(render != nullptr){
+            int format = 0;
+
             render->mutex.lockForRead();
             render->isShowing = true;
             time = render->pts;
-
+            format = render->format;
             static QSize cSize = QSize(0,0);
-            if(cSize != QSize(render->frame->width, render->frame->height) || m_videoSize <= 0){
-                cSize = QSize(render->frame->width, render->frame->height);
-                emit frameSizeChanged(render->frame->width, render->frame->height);
-                if(m_videoSize <= 0)
-                    m_videoSize = av_image_alloc(m_videoData, m_videoLineSize,
-                                                 render->frame->width, render->frame->height,   (AVPixelFormat)render->frame->format, 1);
-
+            if(cSize != QSize(render->width, render->height)){
+                cSize = QSize(render->width, render->height);
+                emit frameSizeChanged(render->width, render->height);
             }
-            if(m_videoData <= 0)
-                return 0;
-            /* copy decoded frame to destination buffer:
-             * this is required since rawvideo expects non aligned data */
-            av_image_copy(m_videoData, m_videoLineSize,
-                          const_cast<const uint8_t **>(render->frame->data), render->frame->linesize,
-                          (AVPixelFormat)render->frame->format, render->frame->width, render->frame->height);
+
+            VideoBuffer *buffer = new VideoBuffer(render->videoData[0], render->videoSize, render->videoLineSize[0]);
             render->mutex.unlock();
-            VideoBuffer *buffer = new VideoBuffer(m_videoData[0], m_videoSize, m_videoLineSize[0]);
-//            qDebug() << "------------------------------m_videoSize" << m_videoSize << render->frame->format; //AV_PIX_FMT_NV12
-            emit newVideoFrame(QVideoFrame(buffer, QSize(render->frame->width, render->frame->height), QVideoFrame::Format_NV12));
+
+            if(mUseHw){
+                if((AVPixelFormat)format == AV_PIX_FMT_NV12)
+                    emit newVideoFrame(QVideoFrame(buffer, cSize, QVideoFrame::Format_NV12));
+                else {
+                    delete buffer;
+                }
+            }else{
+                emit newVideoFrame(QVideoFrame(buffer, cSize, QVideoFrame::Format_YUV420P));
+            }
         }
     }
     return time;
@@ -952,13 +983,12 @@ void AVDecoder::changeRenderItemSize(int width, int height, AVPixelFormat format
     for(int i = 0,len = mRenderList.size();i < len;i++){
         RenderItem *item2 = mRenderList[i];
         item2->mutex.lockForWrite();
-        if(item2->valid){
+        if(item2->videoSize){
             item2->release();
         }
 
-        int numBytes = av_image_get_buffer_size( (AVPixelFormat)format, width,height, 1  );
-        uint8_t * buffer = (uint8_t *)av_malloc(numBytes * sizeof(uint8_t));
-        av_image_fill_arrays( item2->frame->data, item2->frame->linesize, buffer, (AVPixelFormat)format,width,height, 1 );
+        item2->videoSize = av_image_alloc(item2->videoData, item2->videoLineSize,
+                                     width, height,  format, 1);
 
         item2->mutex.unlock();
     }
