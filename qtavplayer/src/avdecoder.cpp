@@ -97,7 +97,7 @@ AVDecoder::AVDecoder(QObject *parent) : QObject(parent), videoq(new PacketQueue)
 #endif
 
     av_log_set_callback(NULL);//不打印日志
-    av_lockmgr_register(lockmgr);
+//    av_lockmgr_register(lockmgr);
     outUrl = "rtmp://192.168.5.138:1936/live/test";
 //    outUrl = MMCSettings::getvalue("video/rtmp/videoUrl", "udp://@227.70.80.90:2000").toString();
 
