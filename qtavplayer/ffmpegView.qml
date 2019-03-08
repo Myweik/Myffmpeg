@@ -16,7 +16,7 @@ Rectangle {
 
         console.log("================================", record)
 
-        avplayer.saveTs(false);
+        avplayer.saveTs(record);
     }
 
 //        property alias displayedPictures: vidEncoder.displayedPictures  //已显示帧

@@ -149,13 +149,12 @@ void AVDecoder::rePlay()
 
 void AVDecoder::saveTs(bool status)
 {
-//    static bool cstatus = !status;
-//    if(cstatus == status){
-//        return;
-//    }else{
-//        cstatus = status;
-//    }
-qDebug() << "---------------------dir" << status << tsSave;
+    static bool cstatus = !status;
+    if(cstatus == status){
+        return;
+    }else{
+        cstatus = status;
+    }
     if(status){
         if(tsSave == nullptr){
             QString dir = QString("%1").arg(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)) + "/MMC Station/Video/" + QDateTime::currentDateTime().toString("yyyyMMdd") + "/";
@@ -168,11 +167,10 @@ qDebug() << "---------------------dir" << status << tsSave;
                 ok = tmpDir1.mkpath(dir);
             }
             if(ok){
-                QString fileName = QDateTime::currentDateTime().toString("hhmmsszzz");
+                QString fileName = QDateTime::currentDateTime().toString("hhmmss");
                 fopen_s(&tsSave, QString("%1%2%3").arg(dir).arg(fileName).arg(".ts").toStdString().data(), "wb");
             }
         }
-//        mProcessThread.addTask(new AVCodecTask(this,AVCodecTask::AVCodecTaskCommand_SetFileName,0,source));
     }else{
         if(tsSave){
             fclose(tsSave);
@@ -855,10 +853,31 @@ qint64 AVDecoder::requestRenderNextFrame(){
             VideoBuffer *buffer = new VideoBuffer(render->videoData[0], render->videoSize, render->videoLineSize[0]);
             render->mutex.unlock();
 
+//            _isSaveImage
+
             if(mUseHw){
-                if((AVPixelFormat)format == AV_PIX_FMT_NV12)
+                if((AVPixelFormat)format == AV_PIX_FMT_NV12){
+
+//                    FILE *pFile;
+//                    char szFilename[32];
+//                    int  y;
+//                    // Open file
+//                    sprintf(szFilename, "frame%d.ppm", 1);
+//                    pFile=fopen(szFilename, "wb");
+//                    //                      if(pFile==NULL)
+//                    //                        return;
+//                    // Write header
+//                    fprintf(pFile, "P6%d %d255", cSize.width(), cSize.height());
+//                    // Write pixel data
+//                    for(y=0; y<cSize.height(); y++)
+//                    {
+//                        fwrite(render->videoData[0] + y*render->videoLineSize[0], 1, cSize.width()*3, pFile);
+//                    }
+//                    // Close file
+//                    fclose(pFile);
+
                     emit newVideoFrame(QVideoFrame(buffer, cSize, QVideoFrame::Format_NV12));
-                else {
+            }else {
                     delete buffer;
                 }
             }else{

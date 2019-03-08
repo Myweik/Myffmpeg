@@ -153,7 +153,8 @@ private:
 
     /** 保存TS流 */
     FILE *tsSave = nullptr;
-    bool _isSaveTs = false;
+    /** 保存Image */
+    bool _isSaveImage = false;
 
 private:
     QTimer      *_fpsTimer = nullptr; //帧率统计心跳
