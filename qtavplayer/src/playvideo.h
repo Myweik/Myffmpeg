@@ -23,6 +23,7 @@ public:
 
     Q_INVOKABLE void setUrl(QString url);
     Q_INVOKABLE void saveTs(bool ok = false);
+    Q_INVOKABLE void saveImage();
 
     bool encodecStatus();
     void setEncodecStatus(bool state);

@@ -14,6 +14,18 @@ Rectangle {
         avplayer.saveTs(record);
     }
 
+//    function raLoad(){ //重启视频
+//        avplayer.setUrl("")
+//        QGroundControl.msleep(10)
+//        avplayer.setUrl(videoSource)
+//    }
+
+    function saveImage(){ //保存图片
+        avplayer.saveImage()
+    }
+
+//    saveImage
+
     onVisibleChanged: {
         if(!visible)
         {

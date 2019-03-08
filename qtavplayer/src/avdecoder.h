@@ -66,14 +66,16 @@ public:
     explicit AVDecoder(QObject *parent = nullptr);
     ~AVDecoder();
     void setMediaCallback(AVMediaCallback *media);
-
     bool getmIsInitEC() {return mIsInitEC;}
+
 public :
     qint64 requestRenderNextFrame();
     void load(); //初始化
     void setFilename(const QString &source);
     void rePlay(); //重新加载
     void saveTs(bool status = false);
+    void saveImage();
+
     qint64 getNextFrameTime();
     int  getRenderListSize();
 
@@ -124,6 +126,9 @@ private :
 
     /* fps统计 */
     void onFpsTimeout();
+    /* 保存图片 */
+    void saveFrame(RenderItem *render = nullptr);
+
 private:
     QString outUrl;
     bool mIsInitEC = false;
@@ -136,7 +141,6 @@ private:
     AVCodecContext *mVideoCodecCtx = nullptr; //mCodecCtx
     AVCodec *mVideoCodec = nullptr;           //mCodec
     struct SwsContext *mVideoSwsCtx = nullptr; //视频参数转换上下文
-
     PacketQueue* videoq = nullptr;      //为解码的视频原始包
     QVector<RenderItem *> mRenderList;  //渲染队列
     QReadWriteLock mRenderListMutex;    //队列操作锁
@@ -157,6 +161,9 @@ private:
     FILE *tsSave = nullptr;
     /** 保存Image */
     bool _isSaveImage = false;
+    AVFrame *_frameRGB = nullptr;
+    uint8_t *_out_buffer = nullptr;
+    struct SwsContext *mRGBSwsCtx = nullptr; //RGB转码器 -- 保存图片用
 
 private:
     QTimer      *_fpsTimer = nullptr; //帧率统计心跳
@@ -238,7 +245,7 @@ public :
     bool        valid;      //有效的
     bool        isShowing;  //显示中
     QReadWriteLock mutex;   //读写锁
-    QMutex      mutexLock;  //互斥锁
+//    QMutex      mutexLock;  //互斥锁
 
 private:
     void release(){

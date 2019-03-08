@@ -45,6 +45,12 @@ void PlayVideo::saveTs(bool ok)
         mDecoder->saveTs(ok);
 }
 
+void PlayVideo::saveImage()
+{
+    if(mDecoder)
+        mDecoder->saveImage();
+}
+
 bool PlayVideo::encodecStatus()
 {
     return mEncodecStatus;

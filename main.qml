@@ -28,13 +28,18 @@ Window {
               }
 
               Button {
-                  text: "save"
+                  text: "save TS"
                   onClicked: play.item.record = true
               }
               Button {
                   text: "Cancel Save"
                   onClicked: play.item.record = false
               }
+              Button {
+                  text: "Save Image"
+                  onClicked: play.item.saveImage()
+              }
+
 
 
           }
