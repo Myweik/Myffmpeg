@@ -18,10 +18,14 @@ public:
     explicit PlayVideo(QObject *parent = nullptr);
     ~PlayVideo();
 
+    Q_PROPERTY(bool encodecStatus READ encodecStatus /*WRITE setEncodecStatus*/ NOTIFY encodecStatusChanged)
     Q_PROPERTY(RtspPlayer *rtspPlayer READ rtspPlayer)
 
     Q_INVOKABLE void setUrl(QString url);
     Q_INVOKABLE void saveTs(bool ok = false);
+
+    bool encodecStatus();
+    void setEncodecStatus(bool state);
 
     RtspPlayer * rtspPlayer(){ return _rtspPlayer; }
     VideoFormat *getRenderData();
@@ -37,7 +41,7 @@ public :
 
 signals:
     void updateVideoFrame(VideoFormat*);
-
+    void encodecStatusChanged();
 public slots:
 
 private:
@@ -60,6 +64,8 @@ private:
     /** 播放状态 */
     AVDefine::AVPlayState mPlaybackState = AVDefine::AVPlayState_Playing;
     VideoFormat *mRenderData = nullptr;
+
+    bool mEncodecStatus = false;
 };
 
 class AVPlayerTask : public Task{

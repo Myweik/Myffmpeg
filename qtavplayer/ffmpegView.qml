@@ -3,29 +3,16 @@ import QtQuick.Window 2.2
 import qtavplayer 1.0
 import QtMultimedia 5.5
 
+//import MMCSettings  1.0
 Rectangle {
     anchors.fill: parent
     color:        Qt.rgba(0,0,0,0.75)
-    property string videoSource:   /*"rtsp://184.72.239.149/vod/mp4://BigBuckBunny_175k.mov" //*/ "udp://@227.70.80.90:2000"
-
-
+    property string videoSource:  "udp://@227.70.80.90:2000" //  /*"rtsp://184.72.239.149/vod/mp4://BigBuckBunny_175k.mov" //*/  MMCSettings.value("video/videoUrl","udp://@227.70.80.90:2000") /*"udp://@227.70.80.90:2000"*/
 
     property bool record: false  //保存视频流用接口
-
     onRecordChanged: {
-
-        console.log("================================", record)
-
         avplayer.saveTs(record);
     }
-
-//        property alias displayedPictures: vidEncoder.displayedPictures  //已显示帧
-//        property alias lostPictures: vidEncoder.lostPictures  //丢失帧
-
-//        function screenshot(){
-//            vidEncoder.screenshot()
-//        }
-
 
     onVisibleChanged: {
         if(!visible)
@@ -35,6 +22,14 @@ Rectangle {
         else{
             avplayer.setUrl(videoSource)
         }
+    }
+
+    Text {
+        z:1
+        anchors.top: parent.top
+        anchors.right: parent.right
+        color: avplayer.encodecStatus ? "#0f0" : "#900"
+        text: avplayer.encodecStatus ? "RTMP push OK ": "RTMP push NG"
     }
 
     VideoOutput {

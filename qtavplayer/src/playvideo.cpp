@@ -23,6 +23,8 @@ PlayVideo::PlayVideo(QObject *parent) : QObject(parent), mDecoder(new AVDecoder)
     wakeupPlayer();
 
     _rtspPlayer->setDecoder(mDecoder);
+    setEncodecStatus(mDecoder->getmIsInitEC());
+    connect(mDecoder, &AVDecoder::senderEncodecStatus, this, &PlayVideo::setEncodecStatus);
 }
 
 PlayVideo::~PlayVideo()
@@ -41,6 +43,17 @@ void PlayVideo::saveTs(bool ok)
 {
     if(mDecoder)
         mDecoder->saveTs(ok);
+}
+
+bool PlayVideo::encodecStatus()
+{
+    return mEncodecStatus;
+}
+
+void PlayVideo::setEncodecStatus(bool state)
+{
+    mEncodecStatus = state;
+    emit encodecStatusChanged();
 }
 
 VideoFormat *PlayVideo::getRenderData()

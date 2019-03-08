@@ -7,9 +7,8 @@
 #include <QStandardPaths>
 #include <QDir>
 
-
+//#include "Settings/mmcsettings.h"
 //输出的地址
-const char *outUrl =  "rtmp://192.168.5.138:1936/live/test";
 AVFormatContext *outputContext = nullptr;
 AVFormatContext *inputContext = nullptr;
 
@@ -99,6 +98,8 @@ AVDecoder::AVDecoder(QObject *parent) : QObject(parent), videoq(new PacketQueue)
 
     av_log_set_callback(NULL);//不打印日志
     av_lockmgr_register(lockmgr);
+    outUrl = "rtmp://192.168.5.138:1936/live/test";
+//    outUrl = MMCSettings::getvalue("video/rtmp/videoUrl", "udp://@227.70.80.90:2000").toString();
 
     _fpsTimer = new QTimer(this);
     _fpsTimer->setInterval(999);
@@ -448,8 +449,11 @@ void AVDecoder::init(){
 
 void AVDecoder::initEncodec()
 {
-    string output = outUrl;
+    if(outUrl.isEmpty())
+        return;
+    string output = outUrl.toStdString();
     mIsInitEC = OpenOutput(output) == 0;
+    emit senderEncodecStatus(mIsInitEC);
 }
 
 int AVDecoder::OpenOutput(string outUrl)

@@ -67,6 +67,7 @@ public:
     ~AVDecoder();
     void setMediaCallback(AVMediaCallback *media);
 
+    bool getmIsInitEC() {return mIsInitEC;}
 public :
     qint64 requestRenderNextFrame();
     void load(); //初始化
@@ -86,7 +87,7 @@ protected:
 signals:
     void frameSizeChanged(int width, int height);
     void newVideoFrame(const QVideoFrame &frame);
-
+    void senderEncodecStatus(bool);
 private:
     qint64 lastReadPacktTime = 0;
     int timeout = 5000;
@@ -124,6 +125,7 @@ private :
     /* fps统计 */
     void onFpsTimeout();
 private:
+    QString outUrl;
     bool mIsInitEC = false;
     bool mIsInit = false;
     bool mIsOpenVideoCodec = false;
