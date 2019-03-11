@@ -245,12 +245,12 @@ public :
     bool        valid;      //有效的
     bool        isShowing;  //显示中
     QReadWriteLock mutex;   //读写锁
-//    QMutex      mutexLock;  //互斥锁
 
-private:
+//private:
     void release(){
-        if(videoSize){
+        if(videoSize > 0){
             av_freep(&videoData[0]);
+            videoSize = 0;
         }
         clear();
     }

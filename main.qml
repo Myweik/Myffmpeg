@@ -15,8 +15,6 @@ Window {
         visible:      true
         source:      "qrc:/ffmpeg/ffmpegView.qml"
     }
-
-
         RowLayout {
               Button {
                   text: "Ok"
@@ -39,8 +37,6 @@ Window {
                   text: "Save Image"
                   onClicked: play.item.saveImage()
               }
-
-
 
           }
 

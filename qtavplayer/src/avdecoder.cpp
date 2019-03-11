@@ -127,6 +127,7 @@ AVDecoder::~AVDecoder()
     if(videoq){
         videoq->release();
         delete videoq;
+        videoq =nullptr;
     }
 }
 
@@ -243,6 +244,8 @@ void AVDecoder::init(){
         qDebug() << "media open error : " << mFilename.toStdString().data();
         statusChanged(AVDefine::AVMediaStatus_NoMedia);
         mIsInit = false;
+        QThread::msleep(10);
+        rePlay();
         return;
     }
     mIsInit = false;
@@ -257,6 +260,9 @@ void AVDecoder::init(){
     {
         qDebug() << "media find stream error : " << mFilename.toStdString().data();
         statusChanged(AVDefine::AVMediaStatus_InvalidMedia);
+
+        QThread::msleep(10);
+        rePlay();
         return;
     }
 
@@ -290,16 +296,22 @@ void AVDecoder::init(){
             }
         }
 
-        if (!(mVideoCodecCtx = avcodec_alloc_context3(mVideoCodec)))
-            return; // AVERROR(ENOMEM);
+        if (!(mVideoCodecCtx = avcodec_alloc_context3(mVideoCodec))){
+            QThread::msleep(10);
+            rePlay();
+            return;
+        }
         //        mVideoCodecCtx = avcodec_alloc_context3(mVideoCodec);
         mVideo = mFormatCtx->streams[mVideoIndex];
         if (!mVideoCodecCtx){
             qDebug() << "create video context fail!" << mFormatCtx->filename;
             statusChanged(AVDefine::AVMediaStatus_InvalidMedia);
         }else{
-            if (avcodec_parameters_to_context(mVideoCodecCtx, mVideo->codecpar) < 0)
+            if (avcodec_parameters_to_context(mVideoCodecCtx, mVideo->codecpar) < 0){
+                QThread::msleep(10);
+                rePlay();
                 return;
+            }
 
             clearRenderList();
             if(mVideoCodecCtx != NULL){
@@ -500,9 +512,11 @@ void AVDecoder::getPacket()
     {
         av_packet_unref(pkt);
         av_freep(pkt);
-        getPacketTask();
-        if(errorSum++ > 10) //一直报错 重启
+        if(errorSum++ > 6){ //一直报错 重启
+            qDebug() << "---------------------------rePlay() 1";
             rePlay();
+        }
+        getPacketTask();
         return;
     }else{
         errorSum = 0;
@@ -548,7 +562,7 @@ void AVDecoder::getPacket()
 
         pkt->pts = pkt->pts == AV_NOPTS_VALUE ? pkt->dts : pkt->pts;
         videoq->put(pkt);   //显示
-        //       qDebug() << "------------------------------getPacket" << videoq->size() << QDateTime::currentMSecsSinceEpoch();
+//               qDebug() << "------------------------------getPacket" << videoq->size() << QDateTime::currentMSecsSinceEpoch();
     }else {
         av_packet_unref(pkt);
         av_freep(pkt);
@@ -589,7 +603,7 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
     RenderItem* item = getInvalidRenderItem();
     if(!item) {
         mVideoCodecCtxMutex.unlock();
-        qDebug() << "-------------------------decode_write lost one AVFrame" << getRenderListSize();
+//        qDebug() << "-------------------------decode_write lost one AVFrame" << getRenderListSize();
         return AVERROR(ENOMEM);
     }
 
@@ -600,7 +614,6 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
         //        fprintf(stderr, "Error during decoding\n");
         return ret;
     }
-
 
     AVFrame *tmp_frame = av_frame_alloc();
     sw_frame = av_frame_alloc();
@@ -661,12 +674,21 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
             }
         }
 
+
+
         if(item->videoSize <= 0){ //初始化
             item->mutex.unlock();
-            /* 初始化渲染队列 */
-            changeRenderItemSize(tmp_frame->width, tmp_frame->height, (AVPixelFormat)tmp_frame->format);
             item->mutex.lockForWrite();
+            /* 初始化渲染队列 */
+            qDebug() << "--------------------------init item->videoSize1" << item->videoSize;
+            item->videoSize = av_image_alloc(item->videoData, item->videoLineSize,
+                                              tmp_frame->width, tmp_frame->height,  (AVPixelFormat)tmp_frame->format, 1);
+//            changeRenderItemSize(tmp_frame->width, tmp_frame->height, (AVPixelFormat)tmp_frame->format);
+            qDebug() << "--------------------------init item->videoSize" << item->videoSize;
+//            item->mutex.lockForWrite();
         }
+
+
 
         if(item->videoSize){
             /* copy decoded frame to destination buffer:
@@ -679,6 +701,7 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
             item->mutex.unlock();
             goto fail;
         }
+
 
         item->width = tmp_frame->width;
         item->height = tmp_frame->height;
@@ -736,7 +759,6 @@ void AVDecoder::statusChanged(AVDefine::AVMediaStatus status){
 }
 
 void AVDecoder::release(bool isDeleted){
-
     mDecodeThread.clearAllTask(); //清除所有任务
     mProcessThread.clearAllTask(); //清除所有任务
 
@@ -773,6 +795,11 @@ void AVDecoder::release(bool isDeleted){
     }
 
     if(outputContext != NULL){
+        for(int i = 0; i < outputContext->nb_streams; i++)
+        {
+            avcodec_close(outputContext->streams[i]->codec);
+        }
+        avformat_close_input(&outputContext);
         avformat_free_context(outputContext);
         outputContext = NULL;
     }
@@ -787,8 +814,9 @@ void AVDecoder::release(bool isDeleted){
         _frameRGB = NULL;
     }
 
-    if(videoq)
+    if(videoq){
         videoq->release();
+    }
     clearRenderList(isDeleted);
     statusChanged(AVDefine::AVMediaStatus_UnknownStatus);
 }
@@ -901,14 +929,22 @@ qint64 AVDecoder::getNextFrameTime()
 
 void AVDecoder::clearRenderList(bool isDelete)
 {
-    mRenderListMutex.lockForRead();
+    if(isDelete)
+        mRenderListMutex.lockForWrite();
+    else
+        mRenderListMutex.lockForRead();
+
     for(int i = 0,len = mRenderList.size();i < len;i++){
         RenderItem *item = mRenderList[i];
-        item->mutex.lockForRead();
-        if(item->valid)
-        {
-            mRenderList[i]->clear();
+        item->mutex.lockForWrite();
+        //        if(item->valid)
+        //        {
+        if(item->videoSize > 0){
+            av_freep(&item->videoData[0]);
+            item->videoSize = 0;
         }
+        //           item->clear();
+        //        }
         item->mutex.unlock();
         if(isDelete){
             delete item;
