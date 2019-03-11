@@ -17,7 +17,7 @@ void AVPlayerTask::run(){
     }
 }
 
-PlayVideo::PlayVideo(QObject *parent) : QObject(parent), mDecoder(new AVDecoder), _rtspPlayer(new RtspPlayer)
+PlayVideo::PlayVideo(QObject *parent) : QObject(parent), mDecoder(new AVDecoder), _rtspPlayer(new RtspPlayer(this))
 {
     mDecoder->setMediaCallback(this);
     wakeupPlayer();
@@ -30,7 +30,7 @@ PlayVideo::PlayVideo(QObject *parent) : QObject(parent), mDecoder(new AVDecoder)
 PlayVideo::~PlayVideo()
 {
     delete mDecoder;
-    delete _rtspPlayer;
+//    delete _rtspPlayer;
 }
 
 void PlayVideo::setUrl(QString url)

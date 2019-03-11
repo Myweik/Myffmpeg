@@ -500,9 +500,9 @@ void AVDecoder::getPacket()
     {
         av_packet_unref(pkt);
         av_freep(pkt);
-        getPacketTask();
         if(errorSum++ > 10) //一直报错 重启
             rePlay();
+        getPacketTask();
         return;
     }else{
         errorSum = 0;
@@ -601,7 +601,6 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
         return ret;
     }
 
-
     AVFrame *tmp_frame = av_frame_alloc();
     sw_frame = av_frame_alloc();
     frame = sw_frame;
@@ -680,6 +679,7 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
             goto fail;
         }
 
+        qDebug() << "--------------------------get" << tmp_frame->width << tmp_frame->height;
         item->width = tmp_frame->width;
         item->height = tmp_frame->height;
         item->format = tmp_frame->format;
@@ -773,6 +773,11 @@ void AVDecoder::release(bool isDeleted){
     }
 
     if(outputContext != NULL){
+        for(int i = 0; i < outputContext->nb_streams; i++)
+        {
+            avcodec_close(outputContext->streams[i]->codec);
+        }
+        avformat_close_input(&outputContext);
         avformat_free_context(outputContext);
         outputContext = NULL;
     }

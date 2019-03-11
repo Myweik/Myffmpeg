@@ -19,7 +19,7 @@ public:
     ~PlayVideo();
 
     Q_PROPERTY(bool encodecStatus READ encodecStatus /*WRITE setEncodecStatus*/ NOTIFY encodecStatusChanged)
-    Q_PROPERTY(RtspPlayer *rtspPlayer READ rtspPlayer)
+    Q_PROPERTY(RtspPlayer *rtspPlayer READ rtspPlayer CONSTANT)
 
     Q_INVOKABLE void setUrl(QString url);
     Q_INVOKABLE void saveTs(bool ok = false);
