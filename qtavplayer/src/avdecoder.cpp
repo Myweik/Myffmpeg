@@ -7,6 +7,9 @@
 #include <QStandardPaths>
 #include <QDir>
 
+#include <QProcess>
+#include <Windows.h>
+
 //#include "Settings/mmcsettings.h"
 //输出的地址
 AVFormatContext *outputContext = nullptr;
@@ -81,7 +84,6 @@ void AVCodecTask::run(){
     case AVCodecTaskCommand_RePlay :   //重新加载
         mCodec->_rePlay();
         break;
-
     }
 }
 
@@ -97,9 +99,9 @@ AVDecoder::AVDecoder(QObject *parent) : QObject(parent), videoq(new PacketQueue)
 #endif
 
     av_log_set_callback(NULL);//不打印日志
-    //    av_lockmgr_register(lockmgr);
-    outUrl = "rtmp://192.168.5.138:1936/live/test";
-    //    outUrl = MMCSettings::getvalue("video/rtmp/videoUrl", "udp://@227.70.80.90:2000").toString();
+    av_lockmgr_register(lockmgr);
+    outUrl = ""; // "rtmp://192.168.5.138:1936/live/test";
+    //    outUrl = MMCSettings::getvalue("video/rtmp/videoUrl", "").toString();
 
     _fpsTimer = new QTimer(this);
     _fpsTimer->setInterval(999);
@@ -112,6 +114,8 @@ AVDecoder::AVDecoder(QObject *parent) : QObject(parent), videoq(new PacketQueue)
 
 AVDecoder::~AVDecoder()
 {
+    QMutexLocker locker(&mDeleteMutex);
+    _fpsTimer->stop();
     mProcessThread.stop();
     mDecodeThread.stop();
     int i = 0;
@@ -159,7 +163,7 @@ void AVDecoder::saveTs(bool status)
     }
     if(status){
         if(tsSave == nullptr){
-            QString dir = QString("%1").arg(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)) + "/MMC Station/Video/" + QDateTime::currentDateTime().toString("yyyyMMdd") + "/";
+            QString dir = QString("%1").arg(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)) + "/MMC Station/Media/Video/" + QDateTime::currentDateTime().toString("yyyyMMdd") + "/";
             QDir tmpDir1;
             qDebug() << "---------------------dir" << dir;
             bool ok = false;
@@ -169,7 +173,7 @@ void AVDecoder::saveTs(bool status)
                 ok = tmpDir1.mkpath(dir);
             }
             if(ok){
-                QString fileName = QDateTime::currentDateTime().toString("hhmmss");
+                QString fileName = QDateTime::currentDateTime().toString("hh_mm_ss");
                 fopen_s(&tsSave, QString("%1%2%3").arg(dir).arg(fileName).arg(".ts").toStdString().data(), "wb");
             }
         }
@@ -186,12 +190,12 @@ void AVDecoder::saveImage()
     _isSaveImage = true;
 }
 
-void AVDecoder::getPacketTask()
+void AVDecoder::getPacketTask(int type)
 {
     mProcessThread.addTask(new AVCodecTask(this,AVCodecTask::AVCodecTaskCommand_GetPacket));
 }
 
-void AVDecoder::decodecTask()
+void AVDecoder::decodecTask(int type)
 {
     mDecodeThread /*mProcessThread*/.addTask(new AVCodecTask(this,AVCodecTask::AVCodecTaskCommand_DecodeToRender));
 }
@@ -211,6 +215,7 @@ static int hw_decoder_init(AVCodecContext *ctx, AVBufferRef *hw_device_ctx, cons
 }
 
 void AVDecoder::init(){
+    QMutexLocker locker(&mDeleteMutex);
     if(mIsInit)
         return;
     mIsInit = true;
@@ -227,12 +232,12 @@ void AVDecoder::init(){
     //    qDebug() << "-----------------------codecs.size" << codecs.size() << codecs;
 
     AVDictionary* options = NULL;
-    //    av_dict_set(&options, "buffer_size", "10240", 0);  //增大“buffer_size”
+    //    av_dict_set(&options, "buffer_size", "102400", 0);  //增大“buffer_size”
     //    av_dict_set(&options, "max_delay", "500000", 0);
     //    av_dict_set(&options, "stimeout", "20000000", 0);  //设置超时断开连接时间
     av_dict_set(&options, "preset", "ultrafast ", 0); // av_opt_set(pCodecCtx->priv_data,"preset","fast",0);
     av_dict_set(&options, "tune", "zerolatency", 0);
-    //    av_dict_set(&options, "rtsp_transport", "udp", 0);  //以udp方式打开，如果以tcp方式打开将udp替换为tcp
+    av_dict_set(&options, "rtsp_transport", "udp", 0);  //以udp方式打开，如果以tcp方式打开将udp替换为tcp
     //寻找视频
     mFormatCtx = avformat_alloc_context();
     lastReadPacktTime = av_gettime();
@@ -245,30 +250,26 @@ void AVDecoder::init(){
         statusChanged(AVDefine::AVMediaStatus_NoMedia);
         mIsInit = false;
         QThread::msleep(10);
+        qDebug() << "--------------------rePlay1";
         rePlay();
         return;
     }
     mIsInit = false;
 
-    mFormatCtx->probesize = 500000;  //
-    qDebug() << "------------mFormatCtx->probesize  mFormatCtx->max_analyze_duration2"<< mFormatCtx->probesize << mFormatCtx->max_analyze_duration;
-
-    //     qDebug()<<"file name is ==="<< QString(mFormatCtx->filename);
-    //     qDebug()<<"the length is ==="<<mFormatCtx->duration/1000000;
-
+    //    mFormatCtx->probesize = 50000000;  //
+    //    qDebug() << "------------mFormatCtx->probesize  mFormatCtx->max_analyze_duration2"<< mFormatCtx->probesize << mFormatCtx->max_analyze_duration;
     if(avformat_find_stream_info(mFormatCtx, NULL) < 0) //判断是否找到视频流信息
     {
         qDebug() << "media find stream error : " << mFilename.toStdString().data();
         statusChanged(AVDefine::AVMediaStatus_InvalidMedia);
 
         QThread::msleep(10);
+        qDebug() << "--------------------rePlay2";
         rePlay();
         return;
     }
-
     /* 寻找视频流 */
-    int ret = av_find_best_stream(mFormatCtx, AVMEDIA_TYPE_VIDEO, -1, -1, &mVideoCodec, 0); //查找视频流信息
-
+    int ret = av_find_best_stream(mFormatCtx, AVMEDIA_TYPE_VIDEO, -1, -1, &mVideoCodec, 0); //查找视频流信息;
     if (ret < 0) {
         qDebug() << "Cannot find a video stream in the input file";
     }else{
@@ -298,6 +299,7 @@ void AVDecoder::init(){
 
         if (!(mVideoCodecCtx = avcodec_alloc_context3(mVideoCodec))){
             QThread::msleep(10);
+            qDebug() << "--------------------rePlay3";
             rePlay();
             return;
         }
@@ -309,6 +311,7 @@ void AVDecoder::init(){
         }else{
             if (avcodec_parameters_to_context(mVideoCodecCtx, mVideo->codecpar) < 0){
                 QThread::msleep(10);
+                qDebug() << "--------------------rePlay4";
                 rePlay();
                 return;
             }
@@ -318,7 +321,7 @@ void AVDecoder::init(){
                 if(avcodec_is_open(mVideoCodecCtx))
                     avcodec_close(mVideoCodecCtx);
             }
-            mHWConfigList.clear();
+            //            mHWConfigList.clear();
             mVideoCodecCtxMutex.lockForWrite();
             if(mHWConfigList.size() > 0){
                 for(int i = 0; i < mHWConfigList.size(); i++){
@@ -368,6 +371,7 @@ void AVDecoder::init(){
                 videoq->setTimeBase(mFormatCtx->streams[mVideoIndex]->time_base);
                 videoq->init();
 
+                _videoSize = 0;
                 //-- 启动抓包线程 和 解码线程
                 getPacketTask();
                 decodecTask();
@@ -375,12 +379,11 @@ void AVDecoder::init(){
                 statusChanged(AVDefine::AVMediaStatus_InvalidMedia);
             }
 
-
-
             if(mPixFormat != mVideoCodecCtx->pix_fmt)
                 mPixFormat = mVideoCodecCtx->pix_fmt;
             if(mSize != QSize(mVideoCodecCtx->width, mVideoCodecCtx->height) )
                 mSize = QSize(mVideoCodecCtx->width, mVideoCodecCtx->height);
+
             if(!mUseHw) //初始化转换器
             {
                 switch (mVideoCodecCtx->pix_fmt) {
@@ -490,7 +493,7 @@ Error:
 
 void AVDecoder::getPacket()
 {
-    //    qDebug() << "------------------------------getPacket" <<  mIsInit << mIsOpenVideoCodec;
+    //        qDebug() << "------------------------------getPacket" <<  mIsInit << mIsOpenVideoCodec;
     if(!mIsInit || !mIsOpenVideoCodec){ //必须初始化
         statusChanged(AVDefine::AVMediaStatus_InvalidMedia);
         return;
@@ -503,7 +506,7 @@ void AVDecoder::getPacket()
     if ((ret == AVERROR_EOF || avio_feof(mFormatCtx->pb))) { //读取完成
         av_packet_unref(pkt);
         av_freep(pkt);
-        getPacketTask();
+        getPacketTask(1);
         return;
     }
 
@@ -512,24 +515,27 @@ void AVDecoder::getPacket()
     {
         av_packet_unref(pkt);
         av_freep(pkt);
-        if(errorSum++ > 6){ //一直报错 重启
-            qDebug() << "---------------------------rePlay() 1";
+        qDebug() << "------------------------- <<<<<< 11" <<QDateTime::currentDateTime().toString("hh-dd-ss") << errorSum;
+        if(errorSum++ > 20){ //一直报错 重启
+            qDebug() << "--------------------rePlay5";
             rePlay();
         }
-        getPacketTask();
+        getPacketTask(1);
         return;
     }else{
         errorSum = 0;
     }
+
     if(ret < 0)
     {
+        qDebug() << "------------------------- <<<<<< 22" <<QDateTime::currentDateTime().toString("hh-dd-ss") << errorSum;
         av_packet_unref(pkt);
         av_freep(pkt);
-        getPacketTask();
+        getPacketTask(1);
         return;
     }
 
-    //    qDebug() << "-----------------------pkt->stream_index" << pkt->stream_index <<   mVideoIndex;
+    //        qDebug() << "-----------------------pkt->stream_index" << pkt->stream_index <<   mVideoIndex;
     if (pkt->stream_index == mVideoIndex && mIsOpenVideoCodec){
         //计算真实的渲染FPS
         _fpsFrameSum++;
@@ -562,35 +568,36 @@ void AVDecoder::getPacket()
 
         pkt->pts = pkt->pts == AV_NOPTS_VALUE ? pkt->dts : pkt->pts;
         videoq->put(pkt);   //显示
-//               qDebug() << "------------------------------getPacket" << videoq->size() << QDateTime::currentMSecsSinceEpoch();
     }else {
         av_packet_unref(pkt);
         av_freep(pkt);
     }
-    getPacketTask();
+    getPacketTask(1);
 }
 
 void AVDecoder::decodec()
 {
-    //    return;
-    //    qDebug() << "------------------------------decodec1" << videoq->size() << getRenderListSize();
+    if(!mIsInit || !mIsOpenVideoCodec){ //必须初始化
+        statusChanged(AVDefine::AVMediaStatus_InvalidMedia);
+        return;
+    }
 
     if(videoq->size() > 20) //清空
         videoq->release();
 
     if(videoq->size() <= 0 || getRenderListSize() >= maxRenderListSize) {
-        decodecTask();
+        decodecTask(1);
         return;
     }
 
     AVPacket *pkt = videoq->get();
     if (pkt->stream_index == mVideoIndex) {
         int ret = decode_write(mVideoCodecCtx, pkt);
-        //        qDebug() << "------------------------------decodec2" << ret <<videoq->size() << getRenderListSize();
+        //        qDebug() << "------------------------------decodec"; // << ret <<videoq->size() << getRenderListSize();
     }
     av_packet_unref(pkt);
     av_freep(pkt);
-    decodecTask();
+    decodecTask(1);
 }
 
 int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
@@ -603,7 +610,7 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
     RenderItem* item = getInvalidRenderItem();
     if(!item) {
         mVideoCodecCtxMutex.unlock();
-//        qDebug() << "-------------------------decode_write lost one AVFrame" << getRenderListSize();
+        //        qDebug() << "-------------------------decode_write lost one AVFrame" << getRenderListSize();
         return AVERROR(ENOMEM);
     }
 
@@ -634,6 +641,7 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
 
         if(mSize != QSize(frame->width, frame->height)){
             /// 重要信息变更 需要转码时重启
+            qDebug() << "--------------------rePlay6" << mSize << QSize(frame->width, frame->height);
             rePlay();
         }
 
@@ -652,6 +660,7 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
             if(mPixFormat != frame->format){
                 /// 重要信息变更 需要转码时重启
                 rePlay();
+                qDebug() << "--------------------rePlay7";
             }
 
             if(mVideoSwsCtx && frame->format != AV_PIX_FMT_YUV420P){
@@ -674,23 +683,20 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
             }
         }
 
-
-
         if(item->videoSize <= 0){ //初始化
             item->mutex.unlock();
             item->mutex.lockForWrite();
             /* 初始化渲染队列 */
-            qDebug() << "--------------------------init item->videoSize1" << item->videoSize;
             item->videoSize = av_image_alloc(item->videoData, item->videoLineSize,
-                                              tmp_frame->width, tmp_frame->height,  (AVPixelFormat)tmp_frame->format, 1);
-//            changeRenderItemSize(tmp_frame->width, tmp_frame->height, (AVPixelFormat)tmp_frame->format);
-            qDebug() << "--------------------------init item->videoSize" << item->videoSize;
-//            item->mutex.lockForWrite();
+                                             tmp_frame->width, tmp_frame->height,  (AVPixelFormat)tmp_frame->format, 1);
+            //            debugMem();
+            //            changeRenderItemSize(tmp_frame->width, tmp_frame->height, (AVPixelFormat)tmp_frame->format);
+            //            item->mutex.lockForWrite();
         }
 
-
-
-        if(item->videoSize){
+        if(item->videoSize > 0){
+            item->mutex.unlock();
+            item->mutex.lockForWrite();
             /* copy decoded frame to destination buffer:
              * this is required since rawvideo expects non aligned data */
             av_image_copy(item->videoData, item->videoLineSize,
@@ -698,19 +704,19 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
                           (AVPixelFormat)tmp_frame->format, tmp_frame->width, tmp_frame->height);
         }else{ // 重启
             rePlay();
+            qDebug() << "--------------------rePlay8";
             item->mutex.unlock();
             goto fail;
         }
-
 
         item->width = tmp_frame->width;
         item->height = tmp_frame->height;
         item->format = tmp_frame->format;
         item->pts   = tmp_frame->pts;
-        item->valid = true;
         if(item->pts != AV_NOPTS_VALUE){
             item->pts = av_q2d(mFormatCtx->streams[mVideoIndex]->time_base ) * item->pts * 1000;
         }
+        item->valid = true;
         item->mutex.unlock();
     }
 
@@ -744,8 +750,59 @@ void AVDecoder::_rePlay()
     }
     mIsOpenVideoCodec = false;
     mIsInit = false;
-    if(mFilename.size() > 0)
+    if(mFilename.size() > 0){
+        QThread::msleep(1);
         load();
+    }
+}
+
+/**
+  * @author yuliuchuan
+  * @date 2015-04-10
+  * 查询程序占用内存。
+  * 思路：通过调用外部命令'tasklist /FI "PID EQ pid"'。
+  * 将返回的字符串首先替换掉','，
+  * 然后用正则表达式匹配已KB为单位表示内存的字符串，
+  * 最后换算为MB为单位返回。
+  */
+QString getUsedMemory(DWORD pid)
+{
+    char pidChar[25];
+    //将DWORD类型转换为10进制的char*类型
+    _ultoa(pid,pidChar,10);
+
+    //调用外部命令
+    QProcess p;
+    p.start("tasklist /FI \"PID EQ " + QString(pidChar) + " \"");
+    p.waitForFinished();
+    //得到返回结果
+    QString result = QString::fromLocal8Bit(p.readAllStandardOutput());
+    //关闭外部命令
+    p.close();
+
+    //替换掉","
+    result = result.replace(",","");
+    //匹配 '数字+空格+K'部分。
+    QRegExp rx("(\\d+)(\\s)(K)");
+    //初始化结果
+    QString usedMem("");
+    if(rx.indexIn(result) != -1){
+        //匹配成功
+        usedMem = rx.cap(0);
+    }
+    //截取K前面的字符串，转换为数字，供换算单位使用。
+    usedMem = usedMem.left(usedMem.length() - 1);
+    //换算为MB的单位
+    return QString::number(usedMem.toDouble() / 1024) + " MB";
+}
+
+void AVDecoder::debugMem()
+{
+    ///获取当前进程
+    DWORD pid = GetCurrentProcessId();
+    QString currentTime = (QTime::currentTime()).toString("hh:mm:ss.zzz");
+    qDebug() << "--------------------" << currentTime +"  Occupied memory:         " << getUsedMemory(pid);
+
 }
 
 /* ------------------------------------------------------私有函数-------------------------------------------------------------- */
@@ -762,6 +819,21 @@ void AVDecoder::release(bool isDeleted){
     mDecodeThread.clearAllTask(); //清除所有任务
     mProcessThread.clearAllTask(); //清除所有任务
 
+    qDebug() << "-----------------------------3";
+    clearRenderList(isDeleted);
+    qDebug() << "-----------------------------7";
+    _videoDatMutex.lockForWrite();
+    if(_videoSize > 0){
+        _videoSizeDeleteing = true;
+    }
+    _videoSize = 0;
+    _videoDatMutex.unlock();
+
+    if(videoq){
+        videoq->release();
+    }
+
+    qDebug() << "-----------------------------0";
     mVideoCodecCtxMutex.lockForWrite();
     if(mVideoCodecCtx != NULL){
         if(avcodec_is_open(mVideoCodecCtx))
@@ -770,13 +842,14 @@ void AVDecoder::release(bool isDeleted){
         mVideoCodecCtx = NULL;
     }
     mVideoCodecCtxMutex.unlock();
+    qDebug() << "-----------------------------1";
     if(mVideoCodec != NULL){
         av_free(mVideoCodec);
         mVideoCodec = NULL;
     }
-
+    qDebug() << "-----------------------------2";
     if(mFormatCtx != NULL){
-        if( mIsOpenVideoCodec){
+        if( mIsOpenVideoCodec ){
             av_read_pause(mFormatCtx);
             avformat_close_input(&mFormatCtx);
         }
@@ -784,16 +857,17 @@ void AVDecoder::release(bool isDeleted){
         mFormatCtx = NULL;
     }
 
+    qDebug() << "-----------------------------9";
     if(mVideoSwsCtx != NULL){
         sws_freeContext(mVideoSwsCtx);
         mVideoSwsCtx = NULL;
     }
-
+    qDebug() << "-----------------------------4";
     if(mRGBSwsCtx != NULL){
         sws_freeContext(mRGBSwsCtx);
         mRGBSwsCtx = NULL;
     }
-
+    qDebug() << "-----------------------------5";
     if(outputContext != NULL){
         for(int i = 0; i < outputContext->nb_streams; i++)
         {
@@ -803,7 +877,7 @@ void AVDecoder::release(bool isDeleted){
         avformat_free_context(outputContext);
         outputContext = NULL;
     }
-
+    qDebug() << "-----------------------------6";
     if(_out_buffer != NULL){
         av_free(_out_buffer);
         _out_buffer = NULL;
@@ -814,10 +888,8 @@ void AVDecoder::release(bool isDeleted){
         _frameRGB = NULL;
     }
 
-    if(videoq){
-        videoq->release();
-    }
-    clearRenderList(isDeleted);
+    qDebug() << "-----------------------------8";
+
     statusChanged(AVDefine::AVMediaStatus_UnknownStatus);
 }
 
@@ -826,39 +898,59 @@ void AVDecoder::release(bool isDeleted){
 qint64 AVDecoder::requestRenderNextFrame(){
     qint64 time = 0;
     if(getRenderListSize() > 0){
-        /* 清理上次显示的数据 */
-        RenderItem *render =  getShowRenderItem();
-        if(render != nullptr){
-            render->mutex.lockForWrite();
-//            render->mutexLock.lock();
-            render->clear();
-//            render->mutexLock.unlock();
-            render->mutex.unlock();
-        }
-
         /* 显示本次数据 */
-        render = getMinRenderItem();
+        RenderItem *render = getMinRenderItem();
         if(render != nullptr){
             int format = 0;
-
             render->mutex.lockForRead();
-            render->isShowing = true;
             time = render->pts;
             format = render->format;
             static QSize cSize = QSize(0,0);
-            if(cSize != QSize(render->width, render->height)){
-                cSize = QSize(render->width, render->height);
-                emit frameSizeChanged(render->width, render->height);
+
+            _videoDatMutex.lockForWrite();
+            if(cSize != QSize(render->width, render->height) || _videoSize <= 0){
+                if(cSize != QSize(render->width, render->height)){
+                    cSize = QSize(render->width, render->height);
+                    emit frameSizeChanged(render->width, render->height);
+                }
+
+                if(_videoSize <= 0){
+                    if(!_videoSize)
+                        if(_videoSizeDeleteing){
+                            av_freep(&_videoData[0]);
+                            _videoSizeDeleteing =false;
+                        }
+                    _videoSize = av_image_alloc(_videoData, _videoLineSize,
+                                                cSize.width(), cSize.height(),  (AVPixelFormat)format , 1);
+                }
             }
 
-            VideoBuffer *buffer = new VideoBuffer(render->videoData[0], render->videoSize, render->videoLineSize[0]);
+            if(_videoSize<=0){
+                _videoDatMutex.unlock();
+                render->mutex.unlock();
+                return time;
+            }else{
+
+                av_image_copy(_videoData, _videoLineSize, const_cast<const uint8_t **>(render->videoData), render->videoLineSize
+                              ,(AVPixelFormat)format, cSize.width(), cSize.height());
+            }
+            _videoDatMutex.unlock();
             render->mutex.unlock();
+
+            _videoDatMutex.lockForRead();
+            VideoBuffer *buffer = new VideoBuffer(_videoData[0], _videoSize, _videoLineSize[0]);
+            _videoDatMutex.unlock();
 
             if(_isSaveImage){ //保存图片
                 /* RGB转码器 */
                 _isSaveImage = false;
                 saveFrame(render);
             }
+
+            static qint64 lastTime = QDateTime::currentMSecsSinceEpoch();
+            if(QDateTime::currentMSecsSinceEpoch() -lastTime > 70)
+                qDebug() << "---------------------requestRenderNextFrame speed" << QDateTime::currentMSecsSinceEpoch() - lastTime << getRenderListSize();
+            lastTime = QDateTime::currentMSecsSinceEpoch();
 
             if(mUseHw){ //显示
                 if((AVPixelFormat)format == AV_PIX_FMT_NV12){
@@ -869,6 +961,10 @@ qint64 AVDecoder::requestRenderNextFrame(){
             }else{
                 emit newVideoFrame(QVideoFrame(buffer, cSize, QVideoFrame::Format_YUV420P));
             }
+
+            render->mutex.lockForWrite();
+            render->clear();
+            render->mutex.unlock();
         }
     }
     return time;
@@ -943,13 +1039,14 @@ void AVDecoder::clearRenderList(bool isDelete)
             av_freep(&item->videoData[0]);
             item->videoSize = 0;
         }
-        //           item->clear();
+        item->clear(true);
         //        }
         item->mutex.unlock();
         if(isDelete){
             delete item;
         }
     }
+
     if(isDelete){
         mRenderList.clear();
     }
@@ -991,7 +1088,6 @@ RenderItem *AVDecoder::getMinRenderItem()
             if(minTime == 0){
                 minTime = item->pts;
             }
-
             if(item->pts <= minTime){
                 minTime = item->pts;
                 render = item;
@@ -1102,7 +1198,7 @@ void AVDecoder::saveFrame(RenderItem *render)
         if(ret < 0){
             qWarning() << "Error sws_scale";
         }else{
-            QString dir = QString("%1").arg(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)) + "/MMC Station/Photo/" + QDateTime::currentDateTime().toString("yyyyMMdd") + "/";
+            QString dir = QString("%1").arg(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)) + "/MMC Station/Media/Photo/" + QDateTime::currentDateTime().toString("yyyyMMdd") + "/";
             QDir tmpDir1;
             bool ok = false;
             if(tmpDir1.exists(dir)){

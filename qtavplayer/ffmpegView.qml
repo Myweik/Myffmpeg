@@ -7,14 +7,14 @@ import QtMultimedia 5.5
 Rectangle {
     anchors.fill: parent
     color:        Qt.rgba(0,0,0,0.75)
-    property string videoSource:  "udp://@227.70.80.90:2000" //  /*"rtsp://184.72.239.149/vod/mp4://BigBuckBunny_175k.mov" //*/  MMCSettings.value("video/videoUrl","udp://@227.70.80.90:2000") /*"udp://@227.70.80.90:2000"*/
+    property string videoSource: "rtsp://192.168.4.129:6880/live"   ///*"rtsp://184.72.239.149/vod/mp4://BigBuckBunny_175k.mov" //*/  MMCSettings.value("video/videoUrl","udp://@227.70.80.90:2000") /*"udp://@227.70.80.90:2000"*/
 
     property bool record: false  //保存视频流用接口
     onRecordChanged: {
-        avplayer.saveTs(record);
+        avplayer.saveTs(record)
     }
 
-//    function raLoad(){ //重启视频
+//    function reLoad(){ //重启视频
 //        avplayer.setUrl("")
 //        QGroundControl.msleep(10)
 //        avplayer.setUrl(videoSource)
@@ -23,8 +23,6 @@ Rectangle {
     function saveImage(){ //保存图片
         avplayer.saveImage()
     }
-
-//    saveImage
 
     onVisibleChanged: {
         if(!visible)
@@ -36,13 +34,13 @@ Rectangle {
         }
     }
 
-    Text {
-        z:1
-        anchors.top: parent.top
-        anchors.right: parent.right
-        color: avplayer.encodecStatus ? "#0f0" : "#900"
-        text: avplayer.encodecStatus ? "RTMP push OK ": "RTMP push NG"
-    }
+//    Text {
+//        z:1
+//        anchors.top: parent.top
+//        anchors.right: parent.right
+//        color: avplayer.encodecStatus ? "#0f0" : "#900"
+//        text: avplayer.encodecStatus ? "RTMP push OK ": "RTMP push NG"
+//    }
 
     VideoOutput {
              source: avplayer.rtspPlayer
@@ -50,13 +48,16 @@ Rectangle {
 //             focus : visible // to receive focus and capture key events when visible
          }
 
-//    AVOutput{ //可以同时在多个窗口上播放一个视频
-//        anchors.fill: parent
-//        source: avplayer
-//    }
-
     AVPlayer{
         id : avplayer
     }
-     Component.onCompleted: avplayer.setUrl(videoSource)
+    Component.onCompleted: {
+        if(!visible)
+        {
+            avplayer.setUrl("")
+        }
+        else{
+            avplayer.setUrl(videoSource)
+        }
+    }
 }

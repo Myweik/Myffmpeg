@@ -13,7 +13,7 @@ Window {
         anchors.fill:   parent
         asynchronous: true
         visible:      true
-        source:      "qrc:/ffmpeg/ffmpegView.qml"
+        source:       "qrc:/ffmpeg/ffmpegView.qml"
     }
         RowLayout {
               Button {

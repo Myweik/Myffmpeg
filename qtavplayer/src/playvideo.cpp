@@ -17,7 +17,7 @@ void AVPlayerTask::run(){
     }
 }
 
-PlayVideo::PlayVideo(QObject *parent) : QObject(parent), mDecoder(new AVDecoder), _rtspPlayer(new RtspPlayer(this))
+PlayVideo::PlayVideo(QObject *parent) : QObject(parent), mDecoder(new AVDecoder), _rtspPlayer(new RtspPlayer)
 {
     mDecoder->setMediaCallback(this);
     wakeupPlayer();
@@ -29,8 +29,9 @@ PlayVideo::PlayVideo(QObject *parent) : QObject(parent), mDecoder(new AVDecoder)
 
 PlayVideo::~PlayVideo()
 {
+    mThread.clearAllTask();
     delete mDecoder;
-//    delete _rtspPlayer;
+    delete _rtspPlayer;
 }
 
 void PlayVideo::setUrl(QString url)
@@ -74,20 +75,18 @@ AVDefine::AVPlayState PlayVideo::getPlaybackState()
 
 void PlayVideo::requestRender()
 {
+//    qDebug() << "---------------------------" <<" requestRender";
     /* 1-60  >2 45  >3 30  >4 20  >5 15 */
-    int lent = mDecoder->getRenderListSize();
-    if(lent >= 2){
+    int len = mDecoder->getRenderListSize();
+    if(len >= 1){
         qint64 lastTime = QDateTime::currentMSecsSinceEpoch();
-        qint64 currentTime  = mDecoder->requestRenderNextFrame();
+        qint64 currentTime = mDecoder->requestRenderNextFrame(); //x显示
         int space = QDateTime::currentMSecsSinceEpoch() - lastTime;
-        qint64 nextTime     = mDecoder->getNextFrameTime();
-        int len = mDecoder->getRenderListSize(); //有一帧是处于显示的  不可用
-        static int space2 = 0;
-        space2  = nextTime > currentTime ? nextTime - currentTime : space2;
 
-        if(len >= _cacheFrame){
-            space = _frameStep / 10 + 1;
-        }else if(len >= _cacheFrame - 2){
+        int space2  = _frameStep;
+        if(len > _cacheFrame){
+            space = 10;
+        }else if(len >= _cacheFrame / 2){
             space = space2 - space - _frameStep / 10 -1;;
         }else{
             space = space2 - space + _frameStep / 10 +1;
@@ -95,15 +94,10 @@ void PlayVideo::requestRender()
 
         if(space <= 0){
             space = 1;
-        }else if(space > 50){
-            space = 50;
+        }else if(space > 45){
+            space = 45;
         }
 
-        if(_fps < 29 && space + 3 <= 45 && len <= 2){
-            space += _frameStep / 10;
-        }
-//        if(len > _cacheFrame)
-//            qDebug() << "-------------------------------requestRender" << _cacheFrame << _frameStep << lent << len  <<  currentTime /*<< nextTime << nextTime - currentTime*/ << space;
         mMutex.lock();
         mCondition.wait(&mMutex, space);
         mMutex.unlock();
@@ -141,11 +135,11 @@ void PlayVideo::mediaUpdateFps(uchar fps)
 //    qDebug() << "---------------------------mediaUpdateFps fps"  << fps;
     _fps = fps;
     if(_fps != 0 &&_fps <= 80){
-        _frameStep = 1000 / _fps;
+        _frameStep = 1000 / _fps + 1;
 
         _cacheFrame = _cache / _frameStep + 1;
-        if(_cacheFrame < 5)
-            _cacheFrame = 5;
+        if(_cacheFrame < 7)
+            _cacheFrame = 7;
     }
 }
 

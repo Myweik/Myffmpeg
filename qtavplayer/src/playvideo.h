@@ -19,7 +19,7 @@ public:
     ~PlayVideo();
 
     Q_PROPERTY(bool encodecStatus READ encodecStatus /*WRITE setEncodecStatus*/ NOTIFY encodecStatusChanged)
-    Q_PROPERTY(RtspPlayer *rtspPlayer READ rtspPlayer CONSTANT)
+    Q_PROPERTY(RtspPlayer *rtspPlayer READ rtspPlayer)
 
     Q_INVOKABLE void setUrl(QString url);
     Q_INVOKABLE void saveTs(bool ok = false);
@@ -52,7 +52,7 @@ private:
     uchar       _fps = 0;    //fps
     uchar       _frameStep = 0;
 
-    uint        _cache = 100; //缓存100ms -- 帧数不够时强制缓存数帧
+    uint        _cache = 180; //缓存190ms -- 帧数不够时强制缓存数帧
     uchar       _cacheFrame = 0; //根据fps算的缓存帧数
 
     QWaitCondition mCondition;

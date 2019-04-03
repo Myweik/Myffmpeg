@@ -8,6 +8,7 @@
 #include "AVDefine.h"
 #include "AVMediaCallback.h"
 #include <QDebug>
+#include <QQueue>
 
 #include <QVideoFrame>
 
@@ -85,6 +86,7 @@ protected:
     void decodec();
     void setFilenameImpl(const QString &source);
     void _rePlay();
+    void debugMem();
 
 signals:
     void frameSizeChanged(int width, int height);
@@ -107,8 +109,8 @@ private:
     void initEncodec();
     int  OpenOutput(string outUrl);
 
-    void getPacketTask();
-    void decodecTask();
+    void getPacketTask(int type = -1);
+    void decodecTask(int type = -1);
 
     void release(bool isDeleted = false);
     void statusChanged(AVDefine::AVMediaStatus);
@@ -165,7 +167,16 @@ private:
     uint8_t *_out_buffer = nullptr;
     struct SwsContext *mRGBSwsCtx = nullptr; //RGB转码器 -- 保存图片用
 
+        /* 显示用 */
+    int  _videoSize = 0; //显示用
+    bool _videoSizeDeleteing = false;
+    uint8_t* _videoData[4];
+    int  _videoLineSize[4];
+    QReadWriteLock _videoDatMutex;
+
 private:
+    QMutex mDeleteMutex;
+
     QTimer      *_fpsTimer = nullptr; //帧率统计心跳
     uint        _fpsFrameSum = 0;
 
@@ -217,13 +228,17 @@ public :
     {
 
     }
-    void clear(){
+    void clear(bool init = false){
         pts = AV_NOPTS_VALUE;
         valid = false;
         isShowing  = false;
-        width = 0;
-        height = 0;
         format = 0;
+        if(init){
+            if(videoSize > 0){
+                av_freep(&videoData[0]);
+            }
+            videoSize = 0;
+        }
     }
 
     ~RenderItem(){
@@ -245,14 +260,15 @@ public :
     bool        valid;      //有效的
     bool        isShowing;  //显示中
     QReadWriteLock mutex;   //读写锁
+//    QMutex      mutexLock;  //互斥锁
 
-//private:
+private:
     void release(){
-        if(videoSize > 0){
+        if(videoSize){
             av_freep(&videoData[0]);
             videoSize = 0;
         }
-        clear();
+        clear(true);
     }
 };
 
@@ -260,7 +276,8 @@ class PacketQueue{
 public :
     PacketQueue(){init();}
 
-    QList<AVPacket *> packets;
+    QQueue<AVPacket *> packets;
+//    QList<AVPacket *> packets;
     AVRational time_base;
 
 private :
@@ -297,8 +314,8 @@ public :
 
     void removeToTime(int time){
         mutex.lockForRead();
-        QList<AVPacket *>::iterator begin = packets.begin();
-        QList<AVPacket *>::iterator end = packets.end();
+        QQueue<AVPacket *>::iterator begin = packets.begin();
+        QQueue<AVPacket *>::iterator end = packets.end();
         while(begin != end){
             AVPacket *pkt = *begin;
             if(pkt != NULL){
@@ -345,8 +362,8 @@ public :
 
     void release(){
         mutex.lockForWrite();
-        QList<AVPacket *>::iterator begin = packets.begin();
-        QList<AVPacket *>::iterator end = packets.end();
+        QQueue<AVPacket *>::iterator begin = packets.begin();
+        QQueue<AVPacket *>::iterator end = packets.end();
         while(begin != end){
             AVPacket *pkt = *begin;
             if(pkt != NULL){

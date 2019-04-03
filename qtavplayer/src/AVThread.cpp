@@ -11,9 +11,9 @@ AVThread::~AVThread()
     stop();
     quit();
     wait(100);
-//    if(!isWait){
+    if(mIsRunning){
         terminate();//强行终断
-//    }
+    }
 
     mMutex.lock();
     list<Task *>::iterator begin = mFuns.begin();
@@ -53,7 +53,8 @@ void AVThread::clearAllTask(int type){
             }
         }
     }
-//    mFuns.clear();
+    mFuns.clear();
+    mClearTask = true;
     mMutex.unlock();
 }
 
@@ -78,7 +79,17 @@ int AVThread::size(int type){
     return size;
 }
 
-void AVThread::addTask(Task* task){
+void AVThread::addTask(Task *task, int type)
+{
+    if(type != -1 && mClearTask){
+        mClearTask = false;
+        if(task != NULL){
+            delete task;
+        }
+        return;
+    }
+    mClearTask = false;
+
     mMutex.lock();
     mFuns.push_back(task);
     mMutex.unlock();
@@ -102,8 +113,6 @@ void AVThread::run(){
     mIsRunning = true;
     SYSTEM_INFO info;
     GetSystemInfo(&info);
-//printf("Number of processors: %d.\n", info.dwNumberOfProcessors);
-//    DWORD_PTR SetThreadAffinityMask(HANDLE hThread, DWORD_PTR dwThreadAffinityMask);
     if(info.dwNumberOfProcessors == 4)
         SetThreadAffinityMask(currentThread(), 0x08);
 

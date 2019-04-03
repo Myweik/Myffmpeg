@@ -20,7 +20,7 @@ class AVThread : public QThread
 public:
     AVThread();
     ~AVThread();
-    void addTask(Task *task);
+    void addTask(Task *task, int type = -1);
     void stop();
     void clearAllTask(int type = -1);
     int size(int type = -1);
@@ -32,5 +32,7 @@ private :
     list<Task *> mFuns;
     QMutex mMutex;
     bool mIsRunning;
+
+    bool mClearTask = false;
 };
 #endif // AVTHREAD_H
