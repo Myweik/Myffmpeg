@@ -47,17 +47,8 @@ extern "C"
     #endif
 }
 class AVDecoder;
-class RenderItem;
 class PacketQueue;
-struct VideoFormat{
-    float width;
-    float height;
-    float rotate;
-    int format;
-
-    AVFrame *renderFrame;
-    QMutex *renderFrameMutex;
-};
+class FrameQueue;
 
 class AVDecoder: public QObject
 {
@@ -77,17 +68,15 @@ public :
     void saveTs(bool status = false);
     void saveImage();
 
-    qint64 getNextFrameTime();
-    int  getRenderListSize();
-
 protected:
     void init();
     void getPacket();
     void decodec();
     void setFilenameImpl(const QString &source);
     void _rePlay();
-    void debugMem();
 
+    void requestRender(); //显示数据
+    void wakeupPlayer();
 signals:
     void frameSizeChanged(int width, int height);
     void newVideoFrame(const QVideoFrame &frame);
@@ -118,18 +107,10 @@ private:
     static enum AVPixelFormat get_hw_format(AVCodecContext *ctx, const enum AVPixelFormat *pix_fmts);
 
 private :
-    void initRenderList();
-    void clearRenderList(bool isDelete = false);
-    RenderItem *getInvalidRenderItem();
-    RenderItem *getMinRenderItem();
-    RenderItem *getShowRenderItem();
-    /* 软解需要 */
-    void changeRenderItemSize(int width,int height,AVPixelFormat format);
-
     /* fps统计 */
     void onFpsTimeout();
     /* 保存图片 */
-    void saveFrame(RenderItem *render = nullptr);
+    void saveFrame(AVFrame *frame = nullptr);
 
 private:
     QString outUrl;
@@ -143,10 +124,9 @@ private:
     AVCodecContext *mVideoCodecCtx = nullptr; //mCodecCtx
     AVCodec *mVideoCodec = nullptr;           //mCodec
     struct SwsContext *mVideoSwsCtx = nullptr; //视频参数转换上下文
+
     PacketQueue* videoq = nullptr;      //为解码的视频原始包
-    QVector<RenderItem *> mRenderList;  //渲染队列
-    QReadWriteLock mRenderListMutex;    //队列操作锁
-    int maxRenderListSize = 15;         //渲染队列最大数量
+    FrameQueue* renderq = nullptr;      //为解码后视频包
 
     /* 资源锁 */
     QReadWriteLock mVideoCodecCtxMutex;
@@ -154,8 +134,6 @@ private:
     //  ----- HW
     QList<AVCodecHWConfig *> mHWConfigList;
     bool                     mUseHw = false;
-    /** 硬解上下文 */
-    AVBufferRef *mHWDeviceCtx;
     /** 硬解格式 */
     enum AVPixelFormat mHWPixFormat;
 
@@ -167,13 +145,6 @@ private:
     uint8_t *_out_buffer = nullptr;
     struct SwsContext *mRGBSwsCtx = nullptr; //RGB转码器 -- 保存图片用
 
-        /* 显示用 */
-    int  _videoSize = 0; //显示用
-    bool _videoSizeDeleteing = false;
-    uint8_t* _videoData[4];
-    int  _videoLineSize[4];
-    QReadWriteLock _videoDatMutex;
-
 private:
     QMutex mDeleteMutex;
 
@@ -181,11 +152,11 @@ private:
     uint        _fpsFrameSum = 0;
 
     uchar       _fps = 0;
-    VideoFormat vFormat;
     QSize mSize = QSize(0,0);
     enum AVPixelFormat mPixFormat;  //原始格式格式
     AVThread mProcessThread;
     AVThread mDecodeThread;
+    AVThread mPlayeThread; //播放线程
     AVMediaCallback *mCallback = nullptr;
     AVDefine::AVMediaStatus mStatus = AVDefine::AVMediaStatus_UnknownStatus;
 };
@@ -205,6 +176,7 @@ public :
         AVCodecTaskCommand_RePlay,   //重新加载
         AVCodecTaskCommand_saveTS,   //保存TS流
         AVCodecTaskCommand_saveImage,//保存图片
+        AVCoTaskCommand_Render,
     };
     AVCodecTask(AVDecoder *codec,AVCodecTaskCommand command,double param = 0,QString param2 = ""):
         mCodec(codec),command(command),param(param),param2(param2){}
@@ -218,57 +190,58 @@ private :
     QString param2;
 };
 
-class RenderItem{
-   friend class AVDecoder;
+class FrameQueue{
 public :
-    RenderItem()
-        : pts(AV_NOPTS_VALUE)
-        , valid (false)
-        , isShowing(false)
-    {
+    FrameQueue(){init();}
 
+    QQueue<AVFrame *> frames;
+private :
+    QReadWriteLock mutex;
+public :
+    void init(){
+        release();
     }
-    void clear(bool init = false){
-        pts = AV_NOPTS_VALUE;
-        valid = false;
-        isShowing  = false;
-        format = 0;
-        if(init){
-            if(videoSize > 0){
-                av_freep(&videoData[0]);
-            }
-            videoSize = 0;
+
+    void put(AVFrame *frame){
+        if(frame == NULL)
+            return;
+        mutex.lockForWrite();
+        frames.push_back(frame);
+        mutex.unlock();
+    }
+
+    AVFrame *get(){
+        AVFrame *frame = NULL;
+        mutex.lockForWrite();
+        if(frames.size() > 0){
+            frame = frames.front();
+            frames.pop_front();
         }
+        mutex.unlock();
+        return frame;
     }
 
-    ~RenderItem(){
-        if(videoSize){
-            release();
-        }
+    int size(){
+        mutex.lockForRead();
+        int len = frames.size();
+        mutex.unlock();
+        return len;
     }
 
-     /* 帧 */
-    uint8_t*            videoData[4];
-    int                 videoLineSize[4];
-    int                 videoSize = 0;
-
-    int                 format = 0;
-    int                 width = 0;
-    int                 height = 0;
-    qint64              pts;        //播放时间
-
-    bool        valid;      //有效的
-    bool        isShowing;  //显示中
-    QReadWriteLock mutex;   //读写锁
-//    QMutex      mutexLock;  //互斥锁
-
-private:
     void release(){
-        if(videoSize){
-            av_freep(&videoData[0]);
-            videoSize = 0;
+        mutex.lockForWrite();
+        QQueue<AVFrame *>::iterator begin = frames.begin();
+        QQueue<AVFrame *>::iterator end = frames.end();
+        while(begin != end){
+            AVFrame *frame = *begin;
+            if(frame != NULL){
+                av_frame_unref(frame);
+                av_free(frame);
+            }
+            frames.pop_front();
+            begin = frames.begin();
         }
-        clear(true);
+        mutex.unlock();
     }
 };
 

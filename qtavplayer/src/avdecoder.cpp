@@ -8,7 +8,10 @@
 #include <QDir>
 
 #include <QProcess>
-#include <Windows.h>
+
+#include "painter/GlPainter.h"
+
+#define HW true
 
 //#include "Settings/mmcsettings.h"
 //输出的地址
@@ -84,10 +87,15 @@ void AVCodecTask::run(){
     case AVCodecTaskCommand_RePlay :   //重新加载
         mCodec->_rePlay();
         break;
+
+    case AVCoTaskCommand_Render :   //播放
+        mCodec->requestRender();
+        break;
+
     }
 }
 
-AVDecoder::AVDecoder(QObject *parent) : QObject(parent), videoq(new PacketQueue)
+AVDecoder::AVDecoder(QObject *parent) : QObject(parent), videoq(new PacketQueue), renderq(new FrameQueue)
 {
 #ifdef LIBAVUTIL_VERSION_MAJOR
 #if (LIBAVUTIL_VERSION_MAJOR < 56)
@@ -109,7 +117,9 @@ AVDecoder::AVDecoder(QObject *parent) : QObject(parent), videoq(new PacketQueue)
     _fpsTimer->start();
 
     videoq->release();
-    initRenderList();
+    renderq->release();
+
+    wakeupPlayer(); //启动显示线程
 }
 
 AVDecoder::~AVDecoder()
@@ -118,6 +128,7 @@ AVDecoder::~AVDecoder()
     _fpsTimer->stop();
     mProcessThread.stop();
     mDecodeThread.stop();
+    mPlayeThread.stop();
     int i = 0;
     while(!mProcessThread.isRunning() && i++ < 200){
         QThread::msleep(1);
@@ -126,13 +137,28 @@ AVDecoder::~AVDecoder()
     while(!mDecodeThread.isRunning() && i++ < 200){
         QThread::msleep(1);
     }
+    i = 0;
+    while(!mPlayeThread.isRunning() && i++ < 200){
+        QThread::msleep(1);
+    }
+
+    qDebug() << "----------------------AA";
 
     release(true);
+
+    qDebug() << "----------------------BB";
     if(videoq){
         videoq->release();
         delete videoq;
         videoq =nullptr;
     }
+
+    if(renderq){
+        renderq->release();
+        delete renderq;
+        renderq =nullptr;
+    }
+
 }
 
 void AVDecoder::setMediaCallback(AVMediaCallback *media){
@@ -151,6 +177,11 @@ void AVDecoder::setFilename(const QString &source){
 void AVDecoder::rePlay()
 {
     mProcessThread.addTask(new AVCodecTask(this,AVCodecTask::AVCodecTaskCommand_RePlay));
+}
+
+void AVDecoder::wakeupPlayer()
+{
+    mPlayeThread.addTask(new AVCodecTask(this, AVCodecTask::AVCoTaskCommand_Render));
 }
 
 void AVDecoder::saveTs(bool status)
@@ -203,13 +234,14 @@ void AVDecoder::decodecTask(int type)
 static int hw_decoder_init(AVCodecContext *ctx, AVBufferRef *hw_device_ctx, const AVCodecHWConfig* config)
 {
     int err = 0;
-
     if ((err = av_hwdevice_ctx_create(&hw_device_ctx, config->device_type,
                                       NULL, NULL, 0)) < 0) {
         fprintf(stderr, "Failed to create specified HW device.\n");
         return err;
     }
     ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
+    av_buffer_unref(&hw_device_ctx);
+    hw_device_ctx = nullptr;
     ctx->pix_fmt = config->pix_fmt;
     return err;
 }
@@ -244,13 +276,12 @@ void AVDecoder::init(){
     mFormatCtx->interrupt_callback.opaque = this;
     mFormatCtx->interrupt_callback.callback = interrupt_cb;
 
-    if(avformat_open_input(&mFormatCtx, mFilename.toStdString().c_str(), NULL,&options) != 0) //打开视频
+    if(avformat_open_input(&mFormatCtx, mFilename.toStdString().c_str(), NULL, &options) != 0) //打开视频
     {
         qDebug() << "media open error : " << mFilename.toStdString().data();
         statusChanged(AVDefine::AVMediaStatus_NoMedia);
         mIsInit = false;
         QThread::msleep(10);
-        qDebug() << "--------------------rePlay1";
         rePlay();
         return;
     }
@@ -264,7 +295,6 @@ void AVDecoder::init(){
         statusChanged(AVDefine::AVMediaStatus_InvalidMedia);
 
         QThread::msleep(10);
-        qDebug() << "--------------------rePlay2";
         rePlay();
         return;
     }
@@ -283,27 +313,25 @@ void AVDecoder::init(){
                 mCallback->mediaUpdateFps(_fps);
         }
 
-        //选择硬解
-        mHWConfigList.clear();
-        for (int i = 0;; i++) {
-            const AVCodecHWConfig *config = avcodec_get_hw_config(mVideoCodec, i);
-            if (!config) {
-                break;
-            }
-            if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) && config->device_type != AV_HWDEVICE_TYPE_NONE) {
-                mHWConfigList.push_back((AVCodecHWConfig *)config);
-                qDebug() << "------------------------config->device_type" << config->device_type << config->pix_fmt;
-                continue;
+        if(mHWConfigList.size() <= 0){ //全例子仅调用一次  调用会导致内存泄露（未找到释放方法）
+            for (int i = 0;; i++) {
+                const AVCodecHWConfig *config = avcodec_get_hw_config(mVideoCodec, i);
+                if (!config) {
+                    break;
+                }
+                if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) && config->device_type != AV_HWDEVICE_TYPE_NONE) {
+                    mHWConfigList.push_back((AVCodecHWConfig *)config);
+                    qDebug() << "------------------------config->device_type" << config->device_type << config->pix_fmt;
+                    continue;
+                }
             }
         }
 
         if (!(mVideoCodecCtx = avcodec_alloc_context3(mVideoCodec))){
             QThread::msleep(10);
-            qDebug() << "--------------------rePlay3";
             rePlay();
             return;
         }
-        //        mVideoCodecCtx = avcodec_alloc_context3(mVideoCodec);
         mVideo = mFormatCtx->streams[mVideoIndex];
         if (!mVideoCodecCtx){
             qDebug() << "create video context fail!" << mFormatCtx->filename;
@@ -311,29 +339,28 @@ void AVDecoder::init(){
         }else{
             if (avcodec_parameters_to_context(mVideoCodecCtx, mVideo->codecpar) < 0){
                 QThread::msleep(10);
-                qDebug() << "--------------------rePlay4";
                 rePlay();
                 return;
             }
 
-            clearRenderList();
-            if(mVideoCodecCtx != NULL){
-                if(avcodec_is_open(mVideoCodecCtx))
-                    avcodec_close(mVideoCodecCtx);
-            }
-            //            mHWConfigList.clear();
+//            if(mVideoCodecCtx != NULL){
+//                if(avcodec_is_open(mVideoCodecCtx))
+//                    avcodec_close(mVideoCodecCtx);
+//            }
+
             mVideoCodecCtxMutex.lockForWrite();
-            if(mHWConfigList.size() > 0){
+            if(HW && mHWConfigList.size() > 0){ //选择硬解
                 for(int i = 0; i < mHWConfigList.size(); i++){
                     if(mVideoCodecCtx != NULL){
                         if(avcodec_is_open(mVideoCodecCtx))
                             avcodec_close(mVideoCodecCtx);
                     }
-
-                    const AVCodecHWConfig *config = mHWConfigList.at(mHWConfigList.size() - 1- i); //mHWConfigList.front();
+                    const AVCodecHWConfig *config = mHWConfigList.at(mHWConfigList.size() - 1- i);
                     mHWPixFormat = config->pix_fmt;
                     mVideoCodecCtx->get_format = get_hw_format; //回调 &mHWDeviceCtx
-                    if ( hw_decoder_init(mVideoCodecCtx, mHWDeviceCtx,config) < 0) {
+                    /** 硬解上下文 */
+                    AVBufferRef *hWDeviceCtx = nullptr;
+                    if ( hw_decoder_init(mVideoCodecCtx, hWDeviceCtx, config) < 0) {
                         mUseHw = false;
                     }else{
                         mUseHw = true;
@@ -344,8 +371,13 @@ void AVDecoder::init(){
                         mIsOpenVideoCodec = true;
                         qDebug() << "-----------------------config->device_type OK" << config->device_type << config->pix_fmt;
                         break;
-                    }else
-                        qDebug() << "-----------------------config->device_type NG" << config->device_type << config->pix_fmt;
+                    }else{
+                        qDebug() << "-----------------------config->device_type NG" << config->device_type << config->pix_fmt << mVideoCodecCtx->hw_device_ctx;
+                        if(mVideoCodecCtx->hw_device_ctx){
+                            av_buffer_unref(&mVideoCodecCtx->hw_device_ctx);
+                            mVideoCodecCtx->hw_device_ctx = nullptr;
+                        }
+                    }
                 }
             }else{
                 mVideoCodecCtx->thread_count = 0; //线程数
@@ -358,11 +390,11 @@ void AVDecoder::init(){
             if(mIsOpenVideoCodec){
                 AVDictionaryEntry *tag = NULL;
                 tag = av_dict_get(mFormatCtx->streams[mVideoIndex]->metadata, "rotate", tag, 0);
-                if(tag != NULL)
-                    vFormat.rotate = QString(tag->value).toInt();
+//                if(tag != NULL)
+//                    vFormat.rotate = QString(tag->value).toInt();
                 av_free(tag);
-                vFormat.width = mVideoCodecCtx->width;
-                vFormat.height = mVideoCodecCtx->height;
+//                vFormat.width = mVideoCodecCtx->width;
+//                vFormat.height = mVideoCodecCtx->height;
                 //                    vFormat.format = mVideoCodecCtx->pix_fmt;
 
                 if(mCallback){
@@ -371,7 +403,7 @@ void AVDecoder::init(){
                 videoq->setTimeBase(mFormatCtx->streams[mVideoIndex]->time_base);
                 videoq->init();
 
-                _videoSize = 0;
+                renderq->init();
                 //-- 启动抓包线程 和 解码线程
                 getPacketTask();
                 decodecTask();
@@ -493,7 +525,6 @@ Error:
 
 void AVDecoder::getPacket()
 {
-    //        qDebug() << "------------------------------getPacket" <<  mIsInit << mIsOpenVideoCodec;
     if(!mIsInit || !mIsOpenVideoCodec){ //必须初始化
         statusChanged(AVDefine::AVMediaStatus_InvalidMedia);
         return;
@@ -515,9 +546,7 @@ void AVDecoder::getPacket()
     {
         av_packet_unref(pkt);
         av_freep(pkt);
-        qDebug() << "------------------------- <<<<<< 11" <<QDateTime::currentDateTime().toString("hh-dd-ss") << errorSum;
         if(errorSum++ > 20){ //一直报错 重启
-            qDebug() << "--------------------rePlay5";
             rePlay();
         }
         getPacketTask(1);
@@ -528,7 +557,6 @@ void AVDecoder::getPacket()
 
     if(ret < 0)
     {
-        qDebug() << "------------------------- <<<<<< 22" <<QDateTime::currentDateTime().toString("hh-dd-ss") << errorSum;
         av_packet_unref(pkt);
         av_freep(pkt);
         getPacketTask(1);
@@ -585,7 +613,7 @@ void AVDecoder::decodec()
     if(videoq->size() > 20) //清空
         videoq->release();
 
-    if(videoq->size() <= 0 || getRenderListSize() >= maxRenderListSize) {
+    if(videoq->size() <= 0) {
         decodecTask(1);
         return;
     }
@@ -593,7 +621,7 @@ void AVDecoder::decodec()
     AVPacket *pkt = videoq->get();
     if (pkt->stream_index == mVideoIndex) {
         int ret = decode_write(mVideoCodecCtx, pkt);
-        //        qDebug() << "------------------------------decodec"; // << ret <<videoq->size() << getRenderListSize();
+        //        qDebug() << "------------------------------decodec"; // << ret <<videoq->size() ;
     }
     av_packet_unref(pkt);
     av_freep(pkt);
@@ -607,18 +635,10 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
     int ret = 0;
     mVideoCodecCtxMutex.lockForRead();
 
-    RenderItem* item = getInvalidRenderItem();
-    if(!item) {
-        mVideoCodecCtxMutex.unlock();
-        //        qDebug() << "-------------------------decode_write lost one AVFrame" << getRenderListSize();
-        return AVERROR(ENOMEM);
-    }
-
     ret = avcodec_send_packet(avctx, packet);  // ret = avcodec_decode_video2(pCodecCtx, pFrame, &got_picture,packet);
     if (ret < 0) {
         qWarning() << "Error during decoding";
         mVideoCodecCtxMutex.unlock();
-        //        fprintf(stderr, "Error during decoding\n");
         return ret;
     }
 
@@ -641,17 +661,15 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
 
         if(mSize != QSize(frame->width, frame->height)){
             /// 重要信息变更 需要转码时重启
-            qDebug() << "--------------------rePlay6" << mSize << QSize(frame->width, frame->height);
             rePlay();
         }
 
-        item->mutex.lockForRead();
         if (mUseHw) { // 硬解拷贝
             /* retrieve data from GPU to CPU */
             if(frame->format == mHWPixFormat ){
                 if ((ret = av_hwframe_transfer_data(tmp_frame, frame, 0)) < 0) {
                     qWarning() << "Error transferring the data to system memory";
-                    item->mutex.unlock();
+
                     goto fail;
                 }else
                     av_frame_copy_props(tmp_frame, frame);
@@ -660,7 +678,6 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
             if(mPixFormat != frame->format){
                 /// 重要信息变更 需要转码时重启
                 rePlay();
-                qDebug() << "--------------------rePlay7";
             }
 
             if(mVideoSwsCtx && frame->format != AV_PIX_FMT_YUV420P){
@@ -674,50 +691,24 @@ int AVDecoder::decode_write(AVCodecContext *avctx, AVPacket *packet)
 
                 if(ret < 0){
                     qWarning() << "Error sws_scale";
-
-                    item->mutex.unlock();
                     goto fail;
                 }
             }else{  //内存移动 -- 不然会被释放
                 av_frame_move_ref(tmp_frame, frame);
             }
         }
-
-        if(item->videoSize <= 0){ //初始化
-            item->mutex.unlock();
-            item->mutex.lockForWrite();
-            /* 初始化渲染队列 */
-            item->videoSize = av_image_alloc(item->videoData, item->videoLineSize,
-                                             tmp_frame->width, tmp_frame->height,  (AVPixelFormat)tmp_frame->format, 1);
-            //            debugMem();
-            //            changeRenderItemSize(tmp_frame->width, tmp_frame->height, (AVPixelFormat)tmp_frame->format);
-            //            item->mutex.lockForWrite();
+        if(tmp_frame->pts != AV_NOPTS_VALUE){
+            tmp_frame->pts = av_q2d(mFormatCtx->streams[mVideoIndex]->time_base ) * tmp_frame->pts * 1000;
         }
-
-        if(item->videoSize > 0){
-            item->mutex.unlock();
-            item->mutex.lockForWrite();
-            /* copy decoded frame to destination buffer:
-             * this is required since rawvideo expects non aligned data */
-            av_image_copy(item->videoData, item->videoLineSize,
-                          const_cast<const uint8_t **>(tmp_frame->data), tmp_frame->linesize,
-                          (AVPixelFormat)tmp_frame->format, tmp_frame->width, tmp_frame->height);
-        }else{ // 重启
-            rePlay();
-            qDebug() << "--------------------rePlay8";
-            item->mutex.unlock();
+        if(renderq->size() > 10){
             goto fail;
+        }else{
+           renderq->put(tmp_frame);
         }
-
-        item->width = tmp_frame->width;
-        item->height = tmp_frame->height;
-        item->format = tmp_frame->format;
-        item->pts   = tmp_frame->pts;
-        if(item->pts != AV_NOPTS_VALUE){
-            item->pts = av_q2d(mFormatCtx->streams[mVideoIndex]->time_base ) * item->pts * 1000;
-        }
-        item->valid = true;
-        item->mutex.unlock();
+        av_frame_unref(sw_frame);
+        av_frame_free(&sw_frame);
+        mVideoCodecCtxMutex.unlock();
+        return ret;
     }
 
 fail:
@@ -726,12 +717,12 @@ fail:
     av_frame_unref(sw_frame);
     av_frame_free(&sw_frame);
     mVideoCodecCtxMutex.unlock();
-
     return ret;
 }
 
 void AVDecoder::setFilenameImpl(const QString &source){
 
+    qDebug() << "------------------AVDecoder::setFilenameImpl" << source;
     if(mFilename == source) return;
     if(mFilename.size() > 0){
         release();//释放所有资源
@@ -756,54 +747,38 @@ void AVDecoder::_rePlay()
     }
 }
 
-/**
-  * @author yuliuchuan
-  * @date 2015-04-10
-  * 查询程序占用内存。
-  * 思路：通过调用外部命令'tasklist /FI "PID EQ pid"'。
-  * 将返回的字符串首先替换掉','，
-  * 然后用正则表达式匹配已KB为单位表示内存的字符串，
-  * 最后换算为MB为单位返回。
-  */
-QString getUsedMemory(DWORD pid)
+void AVDecoder::requestRender()
 {
-    char pidChar[25];
-    //将DWORD类型转换为10进制的char*类型
-    _ultoa(pid,pidChar,10);
+    /* 1-60  >2 45  >3 30  >4 20  >5 15 */
+    int len = renderq->size();
+    if(len >= 1){
+        qDebug() << "----------------------- len" << len;
+        qint64 lastTime = QDateTime::currentMSecsSinceEpoch();
+        qint64 currentTime = requestRenderNextFrame(); //x显示
+        int space = QDateTime::currentMSecsSinceEpoch() - lastTime;
 
-    //调用外部命令
-    QProcess p;
-    p.start("tasklist /FI \"PID EQ " + QString(pidChar) + " \"");
-    p.waitForFinished();
-    //得到返回结果
-    QString result = QString::fromLocal8Bit(p.readAllStandardOutput());
-    //关闭外部命令
-    p.close();
+       int frameStep = 1000 / _fps + 1;
 
-    //替换掉","
-    result = result.replace(",","");
-    //匹配 '数字+空格+K'部分。
-    QRegExp rx("(\\d+)(\\s)(K)");
-    //初始化结果
-    QString usedMem("");
-    if(rx.indexIn(result) != -1){
-        //匹配成功
-        usedMem = rx.cap(0);
+        int space2  = frameStep;
+        if(len > 3){
+            space = 10;
+        }else if(len >= 2){
+            space = space2 - space - 1;
+        }else{
+            space = space2 - space + 1;
+        }
+
+        if(space <= 0){
+            space = 1;
+        }else if(space > 45){
+            space = 45;
+        }
+        QThread::msleep(space);
     }
-    //截取K前面的字符串，转换为数字，供换算单位使用。
-    usedMem = usedMem.left(usedMem.length() - 1);
-    //换算为MB的单位
-    return QString::number(usedMem.toDouble() / 1024) + " MB";
+    wakeupPlayer();
 }
 
-void AVDecoder::debugMem()
-{
-    ///获取当前进程
-    DWORD pid = GetCurrentProcessId();
-    QString currentTime = (QTime::currentTime()).toString("hh:mm:ss.zzz");
-    qDebug() << "--------------------" << currentTime +"  Occupied memory:         " << getUsedMemory(pid);
 
-}
 
 /* ------------------------------------------------------私有函数-------------------------------------------------------------- */
 
@@ -818,36 +793,29 @@ void AVDecoder::statusChanged(AVDefine::AVMediaStatus status){
 void AVDecoder::release(bool isDeleted){
     mDecodeThread.clearAllTask(); //清除所有任务
     mProcessThread.clearAllTask(); //清除所有任务
-
-    qDebug() << "-----------------------------3";
-    clearRenderList(isDeleted);
-    qDebug() << "-----------------------------7";
-    _videoDatMutex.lockForWrite();
-    if(_videoSize > 0){
-        _videoSizeDeleteing = true;
-    }
-    _videoSize = 0;
-    _videoDatMutex.unlock();
-
     if(videoq){
         videoq->release();
     }
+    if(renderq){
+        renderq->release();
+    }
 
-    qDebug() << "-----------------------------0";
     mVideoCodecCtxMutex.lockForWrite();
     if(mVideoCodecCtx != NULL){
         if(avcodec_is_open(mVideoCodecCtx))
             avcodec_close(mVideoCodecCtx);
+        if(mVideoCodecCtx->hw_device_ctx){
+            av_buffer_unref(&mVideoCodecCtx->hw_device_ctx);
+            mVideoCodecCtx->hw_device_ctx = nullptr;
+        }
         avcodec_free_context(&mVideoCodecCtx);
         mVideoCodecCtx = NULL;
     }
     mVideoCodecCtxMutex.unlock();
-    qDebug() << "-----------------------------1";
     if(mVideoCodec != NULL){
         av_free(mVideoCodec);
         mVideoCodec = NULL;
     }
-    qDebug() << "-----------------------------2";
     if(mFormatCtx != NULL){
         if( mIsOpenVideoCodec ){
             av_read_pause(mFormatCtx);
@@ -856,18 +824,14 @@ void AVDecoder::release(bool isDeleted){
         avformat_free_context(mFormatCtx);
         mFormatCtx = NULL;
     }
-
-    qDebug() << "-----------------------------9";
     if(mVideoSwsCtx != NULL){
         sws_freeContext(mVideoSwsCtx);
         mVideoSwsCtx = NULL;
     }
-    qDebug() << "-----------------------------4";
     if(mRGBSwsCtx != NULL){
         sws_freeContext(mRGBSwsCtx);
         mRGBSwsCtx = NULL;
     }
-    qDebug() << "-----------------------------5";
     if(outputContext != NULL){
         for(int i = 0; i < outputContext->nb_streams; i++)
         {
@@ -877,7 +841,6 @@ void AVDecoder::release(bool isDeleted){
         avformat_free_context(outputContext);
         outputContext = NULL;
     }
-    qDebug() << "-----------------------------6";
     if(_out_buffer != NULL){
         av_free(_out_buffer);
         _out_buffer = NULL;
@@ -887,273 +850,104 @@ void AVDecoder::release(bool isDeleted){
         av_free(_frameRGB);
         _frameRGB = NULL;
     }
-
-    qDebug() << "-----------------------------8";
-
+    if(tsSave){
+        fclose(tsSave);
+        tsSave = nullptr;
+    }
     statusChanged(AVDefine::AVMediaStatus_UnknownStatus);
+    if(mCallback)
+        mCallback->formatCleanUpCallback();
 }
 
 /* ------------------------显示函数---------------------------------- */
 
 qint64 AVDecoder::requestRenderNextFrame(){
     qint64 time = 0;
-    if(getRenderListSize() > 0){
-        /* 显示本次数据 */
-        RenderItem *render = getMinRenderItem();
-        if(render != nullptr){
-            int format = 0;
-            render->mutex.lockForRead();
-            time = render->pts;
-            format = render->format;
-            static QSize cSize = QSize(0,0);
 
-            _videoDatMutex.lockForWrite();
-            if(cSize != QSize(render->width, render->height) || _videoSize <= 0){
-                if(cSize != QSize(render->width, render->height)){
-                    cSize = QSize(render->width, render->height);
-                    emit frameSizeChanged(render->width, render->height);
+    if(renderq->size()){
+        AVFrame* frame = renderq->get();
+        VlcVideoFrame* _frame = nullptr;
+        if(mCallback){
+            mCallback->lockCallback((void**) &_frame);
+//            qDebug() << "--------------------------1" << _frame << frame->format << _frame->width << _frame->height;
+
+            if(!_frame->inited){
+                _frame->inited = true;
+                _frame->width  = frame->width;
+                _frame->height = frame->height;
+                _frame->planeCount = 3;
+
+                for (unsigned int i = 0; i < _frame->planeCount; ++i) {
+                    if(i == 0){
+                        _frame->pitch[i] = _frame->width;
+                        _frame->lines[i] = _frame->height      ;
+                        _frame->visiblePitch[i] = _frame->pitch[i];
+                        _frame->visibleLines[i] = _frame->lines[i];
+                    }else{
+                        _frame->pitch[i] = _frame->width >> 1;
+                        _frame->lines[i] =  _frame->height >> 1;
+                        _frame->visiblePitch[i] = _frame->pitch[i];
+                        _frame->visibleLines[i] = _frame->lines[i];
+                    }
+                    _frame->plane[i].resize(_frame->pitch[i] * _frame->lines[i]);
                 }
+            }
 
-                if(_videoSize <= 0){
-                    if(!_videoSize)
-                        if(_videoSizeDeleteing){
-                            av_freep(&_videoData[0]);
-                            _videoSizeDeleteing =false;
-                        }
-                    _videoSize = av_image_alloc(_videoData, _videoLineSize,
-                                                cSize.width(), cSize.height(),  (AVPixelFormat)format , 1);
+            uint8_t* y = (uint8_t*)_frame->plane[0].data();
+            for(int i = 0; i < _frame->height; i++){ //将y分量拷贝
+                uint8_t* srcy = frame->data[0] + frame->linesize[0] * i;
+                ::memcpy(y, srcy, _frame->width);
+                srcy += frame->linesize[0] ;
+                y += _frame->width ;
+            }
+
+            int uvH = _frame->height >> 1;
+            uint8_t* u = (uint8_t*)_frame->plane[1].data();
+            uint8_t* v = (uint8_t*)_frame->plane[2].data();
+            if((AVPixelFormat)frame->format == AV_PIX_FMT_NV12){
+//                qDebug() << "-------------------->>HW" << frame->linesize[1] << uvH  << _frame->width;
+                for(int i = 0; i < uvH; i++){ //将uv分量拷贝
+                    uint8_t* uv = frame->data[1] + frame->linesize[1] * i;
+                    for(int j = 0; j < (_frame->width >> 1); j++){
+                        *v++ = *uv++;
+                        *u++ = *uv++;
+                    }
+                }
+            }else if((AVPixelFormat)frame->format == AV_PIX_FMT_YUV420P){
+//                qDebug() << "-------------------->>" << frame->linesize[1] << frame->linesize[2] << frame->linesize[3] << frame->linesize[4] << uvH  << _frame->width;
+                for(int i = 0; i < uvH; i++){ //将uv分量拷贝
+                    uint8_t* srcV = frame->data[1] + frame->linesize[1] * i;
+                    uint8_t* srcU = frame->data[2] + frame->linesize[2] * i;  // + (_frame->width >> 1) + 16;
+                    ::memcpy(v, srcV, (_frame->width >> 1));
+                    ::memcpy(u, srcU, (_frame->width >> 1));
+                    srcV += frame->linesize[1] ;
+                    srcU += frame->linesize[2] ;
+                    v += (_frame->width >> 1) ;
+                    u += (_frame->width >> 1) ;
                 }
             }
-
-            if(_videoSize<=0){
-                _videoDatMutex.unlock();
-                render->mutex.unlock();
-                return time;
-            }else{
-
-                av_image_copy(_videoData, _videoLineSize, const_cast<const uint8_t **>(render->videoData), render->videoLineSize
-                              ,(AVPixelFormat)format, cSize.width(), cSize.height());
-            }
-            _videoDatMutex.unlock();
-            render->mutex.unlock();
-
-            _videoDatMutex.lockForRead();
-            VideoBuffer *buffer = new VideoBuffer(_videoData[0], _videoSize, _videoLineSize[0]);
-            _videoDatMutex.unlock();
-
-            if(_isSaveImage){ //保存图片
-                /* RGB转码器 */
-                _isSaveImage = false;
-                saveFrame(render);
-            }
-
-            static qint64 lastTime = QDateTime::currentMSecsSinceEpoch();
-            if(QDateTime::currentMSecsSinceEpoch() -lastTime > 70)
-                qDebug() << "---------------------requestRenderNextFrame speed" << QDateTime::currentMSecsSinceEpoch() - lastTime << getRenderListSize();
-            lastTime = QDateTime::currentMSecsSinceEpoch();
-
-            if(mUseHw){ //显示
-                if((AVPixelFormat)format == AV_PIX_FMT_NV12){
-                    emit newVideoFrame(QVideoFrame(buffer, cSize, QVideoFrame::Format_NV12));
-                }else {
-                    delete buffer;
-                }
-            }else{
-                emit newVideoFrame(QVideoFrame(buffer, cSize, QVideoFrame::Format_YUV420P));
-            }
-
-            render->mutex.lockForWrite();
-            render->clear();
-            render->mutex.unlock();
+             mCallback->unlockCallback();
         }
+        if(_isSaveImage){ //保存图片
+            saveFrame(frame);
+            }
+
+        av_frame_unref(frame);
+        av_free(frame);
     }
     return time;
 }
 
 /* ------------------------------------------------------队列操作-------------------------------------------------------------- */
-void AVDecoder::initRenderList()
-{
-    mRenderListMutex.lockForWrite();
-    if(mRenderList.size() < maxRenderListSize){
-        for(int i = mRenderList.size();i < maxRenderListSize;i++){
-            mRenderList.push_back(new RenderItem);
-        }
-    }
-    mRenderListMutex.unlock();
-}
-
-int AVDecoder::getRenderListSize()
-{
-    int ret = 0;
-    mRenderListMutex.lockForRead();
-    for(int i = 0,len = mRenderList.size();i < len;i++){
-        RenderItem *item = mRenderList[i];
-        item->mutex.lockForRead();
-        if(item->valid)
-            ++ret;
-        item->mutex.unlock();
-    }
-    mRenderListMutex.unlock();
-    return ret;
-}
-
-qint64 AVDecoder::getNextFrameTime()
-{
-    qint64 minTime = 0;
-    RenderItem *render = NULL;
-    mRenderListMutex.lockForRead();
-    for(int i = 0,len = mRenderList.size();i < len;i++){
-        RenderItem *item = mRenderList[i];
-        if(item->isShowing)
-            continue;
-        item->mutex.lockForRead();
-        if(item->valid){
-            if(minTime == 0){
-                minTime = item->pts;
-            }
-
-            if(item->pts <= minTime){
-                minTime = item->pts;
-                render = item;
-            }
-        }
-        item->mutex.unlock();
-    }
-    mRenderListMutex.unlock();
-    return minTime;
-}
-
-void AVDecoder::clearRenderList(bool isDelete)
-{
-    if(isDelete)
-        mRenderListMutex.lockForWrite();
-    else
-        mRenderListMutex.lockForRead();
-
-    for(int i = 0,len = mRenderList.size();i < len;i++){
-        RenderItem *item = mRenderList[i];
-        item->mutex.lockForWrite();
-        //        if(item->valid)
-        //        {
-        if(item->videoSize > 0){
-            av_freep(&item->videoData[0]);
-            item->videoSize = 0;
-        }
-        item->clear(true);
-        //        }
-        item->mutex.unlock();
-        if(isDelete){
-            delete item;
-        }
-    }
-
-    if(isDelete){
-        mRenderList.clear();
-    }
-    mRenderListMutex.unlock();
-}
-
-RenderItem *AVDecoder::getInvalidRenderItem()
-{
-    RenderItem *item = NULL;
-    mRenderListMutex.lockForRead();
-    int len = mRenderList.size();
-    for( int i = 0;i < len;i++){
-        RenderItem *item2 = mRenderList[i];
-        item2->mutex.lockForRead();
-        if(item2->isShowing){
-            item2->mutex.unlock();
-            continue;
-        }
-        if(!item2->valid){
-            item = item2;
-            item2->mutex.unlock();
-            break;
-        }
-        item2->mutex.unlock();
-    }
-    mRenderListMutex.unlock();
-    return item;
-}
-
-RenderItem *AVDecoder::getMinRenderItem()
-{
-    qint64 minTime = 0;
-    RenderItem *render = NULL;
-    mRenderListMutex.lockForRead();
-    for(int i = 0,len = mRenderList.size();i < len;i++){
-        RenderItem *item = mRenderList[i];
-        item->mutex.lockForRead();
-        if(item->valid){
-            if(minTime == 0){
-                minTime = item->pts;
-            }
-            if(item->pts <= minTime){
-                minTime = item->pts;
-                render = item;
-            }
-        }
-        item->mutex.unlock();
-        if((i == len -1) && render){
-            item->mutex.lockForWrite();
-            render->isShowing = true;
-            item->mutex.unlock();
-        }
-
-    }
-    mRenderListMutex.unlock();
-    return render;
-}
-
-RenderItem *AVDecoder::getShowRenderItem()
-{
-    bool getOk = false;
-    RenderItem *render = NULL;
-    mRenderListMutex.lockForRead();
-    for(int i = 0,len = mRenderList.size();i < len;i++){
-        RenderItem *item = mRenderList[i];
-        item->mutex.lockForRead();
-        if(item->valid && item->isShowing){
-            if(getOk){ //一种保护  把多余的清理掉
-                item->clear();
-                item->mutex.unlock();
-                continue;
-            }
-            render = item;
-            getOk = true;
-        }
-        item->mutex.unlock();
-    }
-    mRenderListMutex.unlock();
-    return render;
-}
-
-void AVDecoder::changeRenderItemSize(int width, int height, AVPixelFormat format)
-{
-    mRenderListMutex.lockForWrite();
-    for(int i = 0,len = mRenderList.size();i < len;i++){
-        RenderItem *item2 = mRenderList[i];
-        item2->mutex.lockForWrite();
-        if(item2->videoSize){
-            item2->release();
-        }
-
-        item2->videoSize = av_image_alloc(item2->videoData, item2->videoLineSize,
-                                          width, height,  format, 1);
-
-        item2->mutex.unlock();
-    }
-    mRenderListMutex.unlock();
-}
-
 void AVDecoder::onFpsTimeout()
 {
     if(!mIsInit || !mIsOpenVideoCodec){ //必须初始化
         return;
     }
-    if(getRenderListSize() <= 0) {
-        return;
-    }
+
+//    if(getRenderListSize() <= 0) {
+//        return;
+//    }
 
     if(20 < _fpsFrameSum && _fpsFrameSum < 62){
         _fps = (_fpsFrameSum + _fps) / 2;
@@ -1162,36 +956,36 @@ void AVDecoder::onFpsTimeout()
     }
     _fpsFrameSum = 0;
 }
-
-void AVDecoder::saveFrame(RenderItem *render)
+void AVDecoder::saveFrame(AVFrame *frame)
 {
-    if(!render)
+    _isSaveImage = true;
+    if(!frame)
         return;
-    render->mutex.lockForRead();
     if(mRGBSwsCtx == NULL){
         mRGBSwsCtx = sws_getContext(
-                    render->width,
-                    render->height,
-                    (AVPixelFormat)render->format,
-                    render->width,
-                    render->height,
+                    frame->width,
+                    frame->height,
+                    (AVPixelFormat)frame->format,
+                    frame->width,
+                    frame->height,
                     (AVPixelFormat)AV_PIX_FMT_RGB24,// (AVPixelFormat)vFormat.format,
                     SWS_BICUBIC,NULL,NULL,NULL);
     }
+
     if(mRGBSwsCtx != nullptr){
         if(!_frameRGB){
             _frameRGB = av_frame_alloc();
-            qint64  numBytes = avpicture_get_size(AV_PIX_FMT_RGB24, render->width, render->height);
+            qint64  numBytes = avpicture_get_size(AV_PIX_FMT_RGB24, frame->width, frame->height);
             _out_buffer  = (uint8_t *) av_malloc(numBytes * sizeof(uint8_t));//内存分配
             avpicture_fill((AVPicture *) _frameRGB, _out_buffer, AV_PIX_FMT_RGB24,
-                           render->width, render->height);
+                           frame->width, frame->height);
         }
 
         int ret = sws_scale(mRGBSwsCtx,
-                            render->videoData,
-                            render->videoLineSize,
+                            frame->data,
+                            frame->linesize,
                             0,
-                            render->height,
+                            frame->height,
                             _frameRGB->data,
                             _frameRGB->linesize);
 
@@ -1208,10 +1002,10 @@ void AVDecoder::saveFrame(RenderItem *render)
             }
             if(ok){
                 QString fileName = QDateTime::currentDateTime().toString("hhmmsszzz");
-                QImage img =  QImage(_frameRGB->data[0], render->width, render->height, QImage::Format_RGB888);
+                QImage img =  QImage(_frameRGB->data[0], frame->width, frame->height, QImage::Format_RGB888);
                 img.save(QString("%1%2%3").arg(dir).arg(fileName).arg(".jpg"));
             }
         }
     }
-    render->mutex.unlock();
 }
+

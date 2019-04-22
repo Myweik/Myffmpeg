@@ -77,7 +77,7 @@ void PlayVideo::requestRender()
 {
 //    qDebug() << "---------------------------" <<" requestRender";
     /* 1-60  >2 45  >3 30  >4 20  >5 15 */
-    int len = mDecoder->getRenderListSize();
+    int len = 0; // mDecoder->getRenderListSize();
     if(len >= 1){
         qint64 lastTime = QDateTime::currentMSecsSinceEpoch();
         qint64 currentTime = mDecoder->requestRenderNextFrame(); //x显示

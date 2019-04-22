@@ -7,7 +7,7 @@ import QtMultimedia 5.5
 Rectangle {
     anchors.fill: parent
     color:        Qt.rgba(0,0,0,0.75)
-    property string videoSource: "rtsp://192.168.4.129:6880/live"   ///*"rtsp://184.72.239.149/vod/mp4://BigBuckBunny_175k.mov" //*/  MMCSettings.value("video/videoUrl","udp://@227.70.80.90:2000") /*"udp://@227.70.80.90:2000"*/
+    property string videoSource: "rtmp://live.hkstv.hk.lxdns.com/live/hks1"   ///*"rtsp://184.72.239.149/vod/mp4://BigBuckBunny_175k.mov" //*/  MMCSettings.value("video/videoUrl","udp://@227.70.80.90:2000") /*"udp://@227.70.80.90:2000"*/
 
     property bool record: false  //保存视频流用接口
     onRecordChanged: {

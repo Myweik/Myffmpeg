@@ -16,7 +16,6 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 SOURCES += \
         main.cpp \
-    ffmpeg.cpp
 
 RESOURCES += \
     $$PWD/qml.qrc \
@@ -35,9 +34,6 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 
 #include ($$PWD/Media/Media.pri)
 include ($$PWD/qtavplayer/qtavplayer.pri)
-
-HEADERS += \
-    ffmpeg.h
 
 
 

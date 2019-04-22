@@ -12,6 +12,12 @@ public :
     virtual ~AVMediaCallback(){}
     /** 更新视频帧回调 */
     virtual void mediaUpdateVideoFrame(void*){}
+
+    virtual void *lockCallback(void **planes){ return 0;}
+    virtual void unlockCallback(){}
+    virtual void formatCleanUpCallback(){}
+
+
     /** 更新音频格式回调 */
 //    virtual void mediaUpdateAudioFormat(const QAudioFormat&){}
     /** 更新音频数据格式 */

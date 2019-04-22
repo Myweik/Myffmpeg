@@ -29,7 +29,6 @@ public:
     void setEncodecStatus(bool state);
 
     RtspPlayer * rtspPlayer(){ return _rtspPlayer; }
-    VideoFormat *getRenderData();
     AVDefine::AVPlayState getPlaybackState();
 protected :
     void requestRender();
