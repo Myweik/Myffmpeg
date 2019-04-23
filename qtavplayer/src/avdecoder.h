@@ -10,8 +10,6 @@
 #include <QDebug>
 #include <QQueue>
 
-#include <QVideoFrame>
-
 extern "C"
 {
 
@@ -79,7 +77,6 @@ protected:
     void wakeupPlayer();
 signals:
     void frameSizeChanged(int width, int height);
-    void newVideoFrame(const QVideoFrame &frame);
     void senderEncodecStatus(bool);
 private:
     qint64 lastReadPacktTime = 0;

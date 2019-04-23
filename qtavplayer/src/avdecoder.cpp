@@ -1,6 +1,5 @@
 #include "avdecoder.h"
 #include <QDebug>
-#include "VideoBuffer.h"
 
 #include <QDateTime>
 #include <QTimer>
